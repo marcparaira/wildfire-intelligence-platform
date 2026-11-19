@@ -2,13 +2,16 @@
 **Technology Stack**
 
 **Version:** 0.1
-**Status:** Preliminary — Subject to Technical Evaluation
+**Status:** Phase 1 foundation established; remaining decisions are subject to evaluation
 
 ## 1. Overview
 
-This document summarizes the proposed technologies for the Wildfire Intelligence Platform.
+This document summarizes the selected foundation and proposed technologies for
+the Wildfire Intelligence Platform.
 
-Technology selections are preliminary and may be revised following technical evaluations and comparative studies. System architecture will be documented separately.
+Selected Phase 1 technologies are implemented in the repository. Other
+selections may be revised following technical evaluations and comparative
+studies. System architecture is documented separately.
 
 ## 2. Proposed Technology Stack
 
@@ -17,10 +20,10 @@ Technology selections are preliminary and may be revised following technical eva
 | Frontend | React, TypeScript, Vite | Selected |
 | Frontend Container Runtime | Nginx | Selected |
 | Geospatial Visualization | OpenLayers | Selected |
-| Backend | Python, FastAPI | Proposed |
+| Backend | Python, FastAPI | Selected |
 | Backend Container Runtime | Python on Alpine Linux | Selected |
-| Event Streaming | Apache Kafka | Proposed |
-| Database | PostgreSQL, PostGIS | Proposed |
+| Event Streaming | Apache Kafka | Selected |
+| Database | PostgreSQL, PostGIS | Selected |
 | Cloud Provider | Amazon Web Services (AWS) | Selected |
 | Infrastructure as Code | AWS CDK (TypeScript) | Selected |
 | Object Storage | Amazon S3 | Proposed |
@@ -29,7 +32,12 @@ Technology selections are preliminary and may be revised following technical eva
 
 ## 3. Containerization
 
-All application services will run in individual Podman containers.
+The local environment is defined in the repository-root `compose.yaml`; run
+`podman compose up --build` to start the web application, API,
+PostgreSQL/PostGIS, and Kafka.
+
+Application container definitions live alongside their source in `apps/web`
+and `apps/api`. All application services will run in individual Podman containers.
 
 - Separate build and runtime environments.
 - Multi-stage container builds.

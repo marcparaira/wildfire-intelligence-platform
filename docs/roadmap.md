@@ -2,11 +2,11 @@
 
 ## Phase 1 — Project Foundation
 
-- Scaffold React/Vite and Python/FastAPI applications.
-- Create multi-stage Podman Containerfiles with separate build and runtime stages.
-- Configure PostgreSQL/PostGIS and Kafka locally.
-- Set up linting, tests, and GitHub Actions CI.
-- Document local development commands.
+- [x] Scaffold React/Vite and Python/FastAPI applications.
+- [x] Create multi-stage Podman Containerfiles with separate build and runtime stages.
+- [x] Configure PostgreSQL/PostGIS and Kafka locally.
+- [x] Set up linting, tests, and GitHub Actions CI.
+- [x] Document local development commands.
 
 **Deliverable:** One-command local environment with healthy services.
 

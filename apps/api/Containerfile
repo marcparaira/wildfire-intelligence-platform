@@ -1,0 +1,21 @@
+FROM docker.io/library/python:3.12-alpine AS build
+
+WORKDIR /build
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir .
+
+FROM docker.io/library/python:3.12-alpine AS runtime
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN addgroup -S app && adduser -S -G app app
+COPY --from=build /opt/venv /opt/venv
+COPY healthcheck.py /app/healthcheck.py
+WORKDIR /app
+USER app
+EXPOSE 8000
+CMD ["uvicorn", "wildfire_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
