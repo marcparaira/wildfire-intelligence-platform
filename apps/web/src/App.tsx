@@ -5,6 +5,8 @@ import { FRP_HIGH_COLOR, FRP_LOW_COLOR, FRP_UNAVAILABLE_COLOR, frpPosition, pars
 import { DEFAULT_VIEW_BOUNDS, formatUtc, inDateRange, isRegionId, mergeHotspots, regions, todayUtc } from "./hotspots";
 import type { DateRange, Hotspot, HotspotResults, RegionId } from "./hotspots";
 import { useLiveDetections } from "./live";
+import { usePipelineStatus } from "./pipeline";
+import { PipelineStatusPage, SourceFreshness } from "./PipelineStatus";
 import type { LiveStatus } from "./live";
 import { formatWeatherTime, isWeatherMetric, weatherLegend, weatherMetrics } from "./weather";
 import type { WeatherForecast, WeatherMetric } from "./weather";
@@ -34,6 +36,22 @@ function regionQuery(region: RegionId | ""): URLSearchParams {
     params.set("north", String(north));
   }
   return params;
+}
+
+type View = "map" | "status";
+
+function currentView(): View {
+  return window.location.hash === "#/status" ? "status" : "map";
+}
+
+function useHashView(): View {
+  const [view, setView] = useState(currentView);
+  useEffect(() => {
+    const update = () => setView(currentView());
+    window.addEventListener("hashchange", update);
+    return () => window.removeEventListener("hashchange", update);
+  }, []);
+  return view;
 }
 
 const liveLabels: Record<LiveStatus, string> = {
@@ -131,6 +149,9 @@ function App() {
     setLiveItems([]);
   }, [filters]);
 
+  const view = useHashView();
+  const pipeline = usePipelineStatus(view === "status" ? 15_000 : 60_000);
+
   const liveQuery = useMemo(() => regionQuery(filters.region).toString(), [filters.region]);
   const liveStatus = useLiveDetections(liveQuery, (batch) => {
     const current = batch.filter((hotspot) => inDateRange(hotspot, filters));
@@ -163,10 +184,14 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand"><h1>Wildfire Intelligence Platform</h1></div>
-        <span className="header-source">NASA FIRMS · VIIRS &amp; MODIS NRT</span>
+        <nav className="topnav" aria-label="Views">
+          <a href="#/" aria-current={view === "map" ? "page" : undefined}>Map</a>
+          <a href="#/status" aria-current={view === "status" ? "page" : undefined}>Pipeline status</a>
+        </nav>
+        <span className="header-source">NASA FIRMS · VIIRS &amp; MODIS NRT · Open-Meteo</span>
       </header>
 
-      <main className="workspace">
+      {view === "status" ? <main className="status-main"><PipelineStatusPage state={pipeline} /></main> : <main className="workspace">
         <aside className="sidebar" aria-label="Filters" data-collapsed={!filtersOpen}>
           <div className="panel-heading panel-heading-toggle">
             <h2 hidden={!filtersOpen}>Filters</h2>
@@ -196,6 +221,7 @@ function App() {
             {formError && <p className="form-error" role="alert">{formError}</p>}
             <button type="submit" className="apply-button">Apply filters</button>
           </form>
+          <div hidden={!filtersOpen}><SourceFreshness state={pipeline} /></div>
         </aside>
 
         <section className="content" aria-label="Hotspot dashboard">
@@ -296,7 +322,7 @@ function App() {
             </section>
           </div>
         </aside>
-      </main>
+      </main>}
     </div>
   );
 }

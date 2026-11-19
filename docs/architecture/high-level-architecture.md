@@ -1,26 +1,38 @@
 # Wildfire Intelligence Platform
 
 **High-Level Software Architecture**  
-**Version:** 0.2  
+**Version:** 0.3  
 **Status:** Proposed
 
-This is the target architecture. The README shows the services implemented
-today; [the roadmap](../roadmap.md) describes how the project gets from one to
-the other.
+This is the target architecture. The diagram marks which parts are already
+implemented; [the roadmap](../roadmap.md) describes how the project gets to the
+rest.
 
 ## Architecture Diagram
 
 ```mermaid
 flowchart LR
-    SRC["External sources<br/>FIRMS, Open-Meteo,<br/>OpenAQ, Himawari"]
+    SRC["External sources<br/>NASA FIRMS, Open-Meteo"]
+    SRC_P["Planned sources<br/>OpenAQ, Himawari"]
 
     ING["Ingestor<br/>Scheduled producers"]
 
-    KAFKA["Apache Kafka<br/>+ Schema Registry<br/><br/>source, user, derived,<br/>and dead-letter topics"]
+    subgraph KAFKA["Apache Kafka + Schema Registry"]
+        direction TB
+        T_SRC["Source topics"]
+        T_DLQ["Dead-letter topics"]
+        T_USER["User topics"]
+        T_DER["Derived topics"]
+    end
 
     STREAM["Stream processor<br/>Enrichment, incidents,<br/>statistics, alert matching"]
 
-    WORKER["Sink worker<br/>PostGIS writer, S3 archiver,<br/>alert notifier"]
+    subgraph WORKER["Sink worker"]
+        direction TB
+        W_DB["PostGIS projections"]
+        W_S3["S3 archiver"]
+        W_ALERT["Alert notifier"]
+    end
 
     DB[("PostgreSQL<br/>+ PostGIS")]
     S3[("Amazon S3<br/>Event archive")]
@@ -29,23 +41,37 @@ flowchart LR
     API["FastAPI<br/>REST + SSE"]
     UI["React + OpenLayers<br/>dashboard"]
 
-    SRC --> ING --> KAFKA
-    KAFKA <--> STREAM
-    KAFKA --> WORKER
-    WORKER --> DB & S3 & NOTIFY
-    KAFKA -->|live events| API
-    API -->|user actions| KAFKA
+    SRC --> ING
+    SRC_P -.-> ING
+    ING --> T_SRC
+    T_SRC --> W_DB --> DB
+    W_DB -->|invalid events| T_DLQ
+    T_SRC -->|live detections| API
     API -->|queries| DB
     UI <-->|HTTPS + SSE| API
+
+    T_SRC & T_USER -.-> STREAM
+    STREAM -.-> T_DER
+    T_DER -.->|incidents, alerts| API
+    API -.->|user actions| T_USER
+    T_DER -.-> W_ALERT -.-> NOTIFY
+    T_SRC -.-> W_S3 -.-> S3
 
     classDef external fill:#e0f2fe,stroke:#0284c7,color:#075985
     classDef streaming fill:#fef3c7,stroke:#d97706,color:#92400e
     classDef data fill:#dcfce7,stroke:#16a34a,color:#166534
+    classDef planned fill:#f8fafc,stroke:#94a3b8,stroke-dasharray:5 4,color:#64748b
 
-    class SRC,NOTIFY external
-    class KAFKA streaming
-    class DB,S3 data
+    class SRC external
+    class T_SRC,T_DLQ streaming
+    class DB data
+    class SRC_P,T_USER,T_DER,STREAM,W_S3,W_ALERT,S3,NOTIFY planned
+    style KAFKA fill:#fffbeb,stroke:#d97706,color:#92400e
+    style WORKER fill:#f8fafc,stroke:#64748b
 ```
+
+Solid boxes and arrows are implemented (Phases 1–7); dashed grey boxes and
+dotted arrows are planned.
 
 ## Services
 

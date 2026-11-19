@@ -43,6 +43,14 @@ SINK_WORKER_DLQ = TopicSpec(
 SOURCE_TOPICS = (FIRMS_DETECTIONS, WEATHER_FORECASTS)
 ALL_TOPICS = (*SOURCE_TOPICS, SINK_WORKER_DLQ)
 
+# Consumer groups that project topics into PostGIS, with the topic each one reads.
+SINK_DETECTIONS_GROUP = "sink-worker.postgis.detections"
+SINK_WEATHER_GROUP = "sink-worker.postgis.weather"
+CONSUMER_GROUPS: dict[str, str] = {
+    SINK_DETECTIONS_GROUP: FIRMS_DETECTIONS.name,
+    SINK_WEATHER_GROUP: WEATHER_FORECASTS.name,
+}
+
 
 def value_subject(topic: str) -> str:
     """Schema-registry subject for a topic's values (TopicNameStrategy)."""

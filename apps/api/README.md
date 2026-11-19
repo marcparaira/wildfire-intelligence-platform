@@ -20,6 +20,12 @@ message's ID is the stream position, so a reconnecting browser resumes from its
 a null `id` and are not checked for cross-sensor duplicates until they reach
 PostGIS.
 
+`GET /pipeline/status` reports, per data source, the newest observation (or
+forecast retrieval) with a fresh/delayed/stale verdict and ingest counts from
+PostGIS, plus topic throughput, sink-worker consumer lag, and dead-letter
+counts from Kafka. If PostGIS or Kafka is unreachable, the other half is still
+returned and `errors` names the failure. Results are cached for 10 seconds.
+
 Configuration is provided through environment variables: `DATABASE_URL`,
 `KAFKA_BOOTSTRAP_SERVERS`, and `SCHEMA_REGISTRY_URL`. The container image is
 built from the repository root (`podman build -f apps/api/Containerfile .`)

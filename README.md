@@ -15,37 +15,62 @@ browser.
 
 ```mermaid
 flowchart LR
-    SRC["NASA FIRMS<br/>Open-Meteo"]
+    SRC["External sources<br/>NASA FIRMS, Open-Meteo"]
+    SRC_P["Planned sources<br/>OpenAQ, Himawari"]
+
     ING["Ingestor<br/>Scheduled producers"]
 
-    subgraph KAFKA["Kafka + schema registry"]
+    subgraph KAFKA["Apache Kafka + Schema Registry"]
         direction TB
-        T_SRC["firms.detections<br/>weather.forecasts ⟲"]
-        T_DLQ["sink-worker.dlq"]
+        T_SRC["Source topics"]
+        T_DLQ["Dead-letter topics"]
+        T_USER["User topics"]
+        T_DER["Derived topics"]
     end
 
-    SINK["Sink worker<br/>PostGIS projections"]
-    DB[("PostgreSQL<br/>+ PostGIS")]
-    API["FastAPI<br/>REST + SSE"]
-    WEB["React + OpenLayers<br/>dashboard"]
+    STREAM["Stream processor<br/>Enrichment, incidents,<br/>statistics, alert matching"]
 
-    SRC -->|HTTP polling| ING -->|produce| T_SRC
-    T_SRC -->|consume| SINK
-    SINK -.->|invalid events| T_DLQ
-    SINK -->|upsert| DB
-    API -->|queries| DB
+    subgraph WORKER["Sink worker"]
+        direction TB
+        W_DB["PostGIS projections"]
+        W_S3["S3 archiver"]
+        W_ALERT["Alert notifier"]
+    end
+
+    DB[("PostgreSQL<br/>+ PostGIS")]
+    S3[("Amazon S3<br/>Event archive")]
+    NOTIFY["Email / webhook"]
+
+    API["FastAPI<br/>REST + SSE"]
+    UI["React + OpenLayers<br/>dashboard"]
+
+    SRC --> ING
+    SRC_P -.-> ING
+    ING --> T_SRC
+    T_SRC --> W_DB --> DB
+    W_DB -->|invalid events| T_DLQ
     T_SRC -->|live detections| API
-    WEB <-->|HTTPS + SSE| API
+    API -->|queries| DB
+    UI <-->|HTTPS + SSE| API
+
+    T_SRC & T_USER -.-> STREAM
+    STREAM -.-> T_DER
+    T_DER -.->|incidents, alerts| API
+    API -.->|user actions| T_USER
+    T_DER -.-> W_ALERT -.-> NOTIFY
+    T_SRC -.-> W_S3 -.-> S3
 
     classDef external fill:#e0f2fe,stroke:#0284c7,color:#075985
     classDef streaming fill:#fef3c7,stroke:#d97706,color:#92400e
-    classDef dlq fill:#fee2e2,stroke:#dc2626,color:#991b1b
     classDef data fill:#dcfce7,stroke:#16a34a,color:#166534
+    classDef planned fill:#f8fafc,stroke:#94a3b8,stroke-dasharray:5 4,color:#64748b
 
     class SRC external
-    class T_SRC streaming
-    class T_DLQ dlq
+    class T_SRC,T_DLQ streaming
     class DB data
+    class SRC_P,T_USER,T_DER,STREAM,W_S3,W_ALERT,S3,NOTIFY planned
+    style KAFKA fill:#fffbeb,stroke:#d97706,color:#92400e
+    style WORKER fill:#f8fafc,stroke:#64748b
 ```
 
 ⟲ marks a compacted topic. Arrows show the direction data flows.
@@ -110,6 +135,12 @@ when `compose.yaml` changes: run `podman compose down` (without `-v`), then
   seven-day hourly forecast, on a grid of resolution-2 H3 cells (about
   87,000 km² each). Use the timeline to change the forecast hour.
 - **Refresh data** re-queries the database; it does not trigger ingestion.
+- **Data freshness** in the filter panel shows each source's newest
+  observation (or forecast retrieval) and whether it is fresh, delayed, or
+  stale.
+- **Pipeline status** (<http://localhost:8080/#/status>) adds per-source
+  ingest counts, topic throughput, sink-worker consumer lag, and recent dead
+  letters. See [pipeline monitoring](docs/operations/event-pipeline.md#pipeline-status).
 
 Marker size and color show fire radiative power (FRP) on a log scale capped at
 100 MW. FRP is radiated power, not fire severity or danger, and detections are

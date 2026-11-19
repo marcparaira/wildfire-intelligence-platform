@@ -2,7 +2,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Bounds, Hotspot } from "./hotspots";
+import type { PipelineState } from "./pipeline";
 import type { WeatherPoint } from "./weather";
+
+const pipelineState = vi.hoisted(() => ({ current: { status: null, error: "", loading: true } as PipelineState }));
+
+// The pipeline status poll has its own tests; keep it out of the fetch call counts here.
+vi.mock("./pipeline", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./pipeline")>(),
+  usePipelineStatus: () => pipelineState.current,
+}));
 
 vi.mock("./MapView", () => ({
   default: ({ hotspots, weatherPoints, weatherMetric, bounds, areaBounds, onSelect }: {
@@ -42,6 +51,8 @@ const observation: Hotspot = {
 
 afterEach(() => {
   cleanup();
+  window.location.hash = "";
+  pipelineState.current = { status: null, error: "", loading: true };
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -268,5 +279,43 @@ describe("hotspot dashboard", () => {
     fireEvent.change(screen.getByLabelText("Weather layer"), { target: { value: "wind" } });
 
     expect(await screen.findByText(/No weather forecast has been ingested yet/)).toBeInTheDocument();
+  });
+
+  it("shows source freshness and switches to the pipeline status page", async () => {
+    const recent = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    pipelineState.current = {
+      loading: false,
+      error: "",
+      status: {
+        checked_at: new Date().toISOString(),
+        sources: [{
+          id: "VIIRS_NOAA20_NRT", label: "VIIRS NOAA-20", kind: "observation", topic: "firms.detections",
+          freshness: "fresh", latest_at: recent, oldest_retrieved_at: null, forecast_until: null,
+          latest_ingested_at: recent, latest_stored_at: recent, ingested_last_hour: 3,
+          ingested_last_day: 120, stored: 4000, fresh_within_hours: 18, stale_after_hours: 36,
+        }],
+        topics: null,
+        consumers: null,
+        dead_letters: null,
+        errors: ["Kafka is unavailable; throughput, lag, and dead letters are unknown"],
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [observation], truncated: false }),
+    }));
+    render(<App />);
+
+    const freshness = screen.getByRole("region", { name: "Data freshness" });
+    expect(freshness).toHaveTextContent("VIIRS NOAA-20");
+    expect(freshness).toHaveTextContent("Fresh");
+    expect(freshness).toHaveTextContent("Observed 2 h ago");
+
+    window.location.hash = "#/status";
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    expect(await screen.findByRole("heading", { name: "Pipeline status" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Pipeline status" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText(/Kafka is unavailable/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Hotspot map")).not.toBeInTheDocument();
   });
 });

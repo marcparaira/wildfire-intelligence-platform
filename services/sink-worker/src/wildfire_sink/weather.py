@@ -17,7 +17,7 @@ from wildfire_events.cells import cell_boundary
 from wildfire_events.codec import EventCodec
 from wildfire_events.models import WeatherForecast
 from wildfire_events.registry import SchemaRegistry
-from wildfire_events.topics import WEATHER_FORECASTS, value_subject
+from wildfire_events.topics import SINK_WEATHER_GROUP, WEATHER_FORECASTS, value_subject
 from wildfire_sink.runner import record_key
 
 SCHEMA: list[LiteralString] = [
@@ -83,7 +83,7 @@ class WeatherProjection:
     registry: SchemaRegistry
     name: str = "weather"
     topic: str = WEATHER_FORECASTS.name
-    group_id: str = "sink-worker.postgis.weather"
+    group_id: str = SINK_WEATHER_GROUP
     tombstones: bool = True
     codec: EventCodec[WeatherForecast] = field(init=False)
 

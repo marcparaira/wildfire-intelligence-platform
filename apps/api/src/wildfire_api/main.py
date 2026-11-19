@@ -9,12 +9,14 @@ from pydantic import BaseModel
 
 from wildfire_api.db import connect, fetch_all
 from wildfire_api.live import router as live_router
+from wildfire_api.pipeline import router as pipeline_router
 from wildfire_api.weather import router as weather_router
 
 app = FastAPI(title="Wildfire Intelligence Platform API", version="0.2.0")
 LOGGER = logging.getLogger(__name__)
 app.include_router(weather_router)
 app.include_router(live_router)
+app.include_router(pipeline_router)
 
 
 FirmsProduct = Literal["VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT", "MODIS_NRT"]

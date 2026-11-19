@@ -15,13 +15,12 @@ import psycopg
 from kafka.errors import GroupIdNotFoundError, NoError
 
 from wildfire_events.kafka import admin_client
-from wildfire_sink.detections import DetectionProjection
+from wildfire_events.topics import CONSUMER_GROUPS
 from wildfire_sink.service import Settings
-from wildfire_sink.weather import WeatherProjection
 
 LOGGER = logging.getLogger(__name__)
 TABLES = ("fire_detections", "weather_hourly", "weather_cells")
-GROUPS = [DetectionProjection.group_id, WeatherProjection.group_id]
+GROUPS = list(CONSUMER_GROUPS)
 # kafka-python reports each group's outcome as an error class; NoError means deleted.
 DELETED_ERRNOS = (NoError.errno, GroupIdNotFoundError.errno)
 

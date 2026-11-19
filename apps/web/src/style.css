@@ -216,8 +216,85 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 .recent-item small { margin-top: 3px; color: #596761; font-size: 11px; }
 .recent-foot { padding-top: 8px; font-size: 11px; }
 
+.topnav { display: flex; gap: 2px; }
+.topnav a {
+  padding: 6px 10px;
+  color: #c1ccc7;
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topnav a:hover { color: #fff; background: #34463f; }
+.topnav a[aria-current="page"] { color: #fff; background: #3f5a4d; }
+.topnav a:focus-visible, .freshness a:focus-visible { outline: 2px solid #8ec5ea; outline-offset: 1px; }
+
+.freshness { border-top: 1px solid #d7ddda; }
+.freshness .panel-heading { border-top: 0; }
+.freshness .panel-heading a { color: #1d5a87; font-size: 11px; }
+.freshness ul { margin: 0; padding: 4px 0; list-style: none; }
+.freshness li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  align-items: center;
+  padding: 6px 12px;
+}
+.freshness li small { grid-column: 2; color: #596761; font-size: 11px; font-variant-numeric: tabular-nums; }
+.freshness-source { font-weight: 600; }
+.freshness-empty { margin: 0; padding: 10px 12px; color: #596761; font-size: 11px; line-height: 1.4; }
+.freshness-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #5d6a63;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.freshness-badge i { width: 8px; height: 8px; border-radius: 50%; background: #9aa59f; }
+.freshness-badge[data-freshness="fresh"] { color: #23663f; }
+.freshness-badge[data-freshness="fresh"] i { background: #2f9e5b; }
+.freshness-badge[data-freshness="delayed"] { color: #8d4a19; }
+.freshness-badge[data-freshness="delayed"] i { background: #d97706; }
+.freshness-badge[data-freshness="stale"] { color: #8b301d; }
+.freshness-badge[data-freshness="stale"] i { background: #c2410c; box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.2); }
+.freshness .freshness-badge { min-width: 62px; }
+
+.status-main { flex: 1 1 auto; min-height: 0; overflow-y: auto; background: #fff; }
+.status-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #d7ddda;
+}
+.status-header h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.status-header span { color: #596761; font-size: 12px; }
+.status-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; max-width: 1280px; padding: 4px 16px 24px; }
+.status-sections section { padding-top: 12px; }
+.status-sections h3 { margin: 0 0 4px; font-size: 13px; font-weight: 650; }
+.status-note, .status-unavailable { margin: 0 0 8px; color: #596761; font-size: 12px; line-height: 1.45; }
+.status-note strong { color: #27332d; }
+.table-wrap { overflow-x: auto; border: 1px solid #d7ddda; border-radius: 2px; }
+.status-sections table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.status-sections th, .status-sections td { padding: 7px 10px; border-bottom: 1px solid #e1e5e2; text-align: left; vertical-align: top; white-space: nowrap; }
+.status-sections thead th { color: #46564d; background: #eef1ef; font-size: 11px; font-weight: 600; }
+.status-sections tbody tr:last-child > * { border-bottom: 0; }
+.status-sections tbody th { font-weight: 600; }
+.status-sections td small, .status-sections tbody th small { display: block; margin-top: 2px; color: #6a7770; font-size: 11px; font-weight: 400; }
+.status-sections .num { text-align: right; }
+.status-sections .error-cell { min-width: 240px; white-space: normal; overflow-wrap: anywhere; color: #5b2a1d; }
+.status-sections code { font-size: 11px; }
+.group-state[data-state="Stable"] { color: #23663f; font-weight: 600; }
+.group-state[data-state="Empty"], .group-state[data-state="Dead"] { color: #8b301d; font-weight: 600; }
+.partition-list { display: inline-flex; gap: 10px; color: #46564d; }
+
 @media (max-width: 1050px) {
   .header-source { display: none; }
+  .topnav { margin-left: auto; }
   .sidebar { flex-basis: 210px; }
   .detail-column { flex-basis: 250px; }
 }
@@ -225,6 +302,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
   .app-shell { height: auto; min-height: 100dvh; }
   .topbar { flex-wrap: wrap; gap: 8px 12px; }
   .brand { margin-right: auto; }
+  .status-sections { padding: 4px 12px 20px; }
   .brand span { display: none; }
   .workspace { display: flex; flex-direction: column; }
   .map-toolbar { flex-wrap: wrap; }

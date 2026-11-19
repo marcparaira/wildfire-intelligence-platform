@@ -27,7 +27,7 @@ from psycopg.types.json import Jsonb
 from wildfire_events.codec import EventCodec
 from wildfire_events.models import FirmsDetection
 from wildfire_events.registry import SchemaRegistry
-from wildfire_events.topics import FIRMS_DETECTIONS, value_subject
+from wildfire_events.topics import FIRMS_DETECTIONS, SINK_DETECTIONS_GROUP, value_subject
 
 MATCH_DISTANCE_METERS = 1000
 MATCH_WINDOW = timedelta(minutes=20)
@@ -116,7 +116,7 @@ class DetectionProjection:
     registry: SchemaRegistry
     name: str = "detections"
     topic: str = FIRMS_DETECTIONS.name
-    group_id: str = "sink-worker.postgis.detections"
+    group_id: str = SINK_DETECTIONS_GROUP
     tombstones: bool = False
     codec: EventCodec[FirmsDetection] = field(init=False)
 

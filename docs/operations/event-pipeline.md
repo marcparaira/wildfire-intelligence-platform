@@ -84,6 +84,39 @@ their offsets independently. The weather projection ignores a forecast that is
 older than the one stored for its cell, and deletes a cell when it receives a
 tombstone (a record with a null value).
 
+## Pipeline status
+
+The dashboard's **Pipeline status** page (`#/status`) and
+`GET /api/pipeline/status` show the health of each source. The page refreshes
+every 15 seconds; the API caches results for 10 seconds.
+
+| Measure | Source | Meaning |
+|---|---|---|
+| Freshness | PostGIS | Age of the newest observation (`observed_at`) per FIRMS product, or of the newest forecast retrieval (`generated_at`) |
+| Last ingested / stored | PostGIS | When the ingestor fetched the newest record, and when the sink worker wrote it |
+| Ingested 1 h / 24 h | PostGIS | Records per source by fetch time (`ingested_at`, `generated_at`), so replays do not inflate them |
+| Messages 1 h / 24 h | Kafka | Records appended to each topic, from offsets by timestamp |
+| Consumer lag | Kafka | End offset minus committed offset, per sink-worker group and partition |
+| Dead letters | `sink-worker.dlq` | Records in the last 24 hours by original topic, and the 10 newest with their errors |
+
+Freshness thresholds:
+
+| Source | Fresh | Delayed | Stale |
+|---|---|---|---|
+| FIRMS products | ≤ 18 h | ≤ 36 h | > 36 h |
+| Open-Meteo forecast | ≤ 6 h | ≤ 24 h | > 24 h |
+
+Polar-orbiting satellites pass over the region about twice a day and FIRMS NRT
+data arrive about three hours after acquisition, so a healthy product's newest
+detection can be 15 hours old. The forecast thresholds assume the default
+3-hour `WEATHER_INTERVAL_MINUTES`. `No data` means PostGIS holds nothing for
+the source (for example, a product not listed in `FIRMS_PRODUCTS`); `Unknown`
+means PostGIS could not be read.
+
+A lag that keeps growing means the sink worker is stopped or failing; check
+`podman compose logs sink-worker`. A consumer group in the `Empty` state has no
+running members. After a replay, lag counts down to zero.
+
 ## Rebuilding PostGIS by replaying the topics
 
 Use this after changing a projection's table layout, after data loss in
@@ -113,7 +146,8 @@ PostGIS, or to verify that the database is a faithful projection of the log.
    podman compose logs -f sink-worker
    ```
 
-The rebuild is complete when the consumer-group lag in Kafka UI reaches zero.
+The rebuild is complete when the consumer lag on the dashboard's Pipeline
+status page (or in Kafka UI) reaches zero.
 Cross-sensor duplicate marking is order independent, so a replay produces the
 same `duplicate_of` values as live processing. Row `id` values are reassigned.
 
