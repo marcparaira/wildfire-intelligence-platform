@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import MapView from "./MapView";
 import { FRP_HIGH_COLOR, FRP_LOW_COLOR, FRP_UNAVAILABLE_COLOR, frpPosition, parseFrp } from "./frp";
 import { DEFAULT_VIEW_BOUNDS, formatUtc, isRegionId, regions } from "./hotspots";
 import type { Hotspot, HotspotResults, RegionId } from "./hotspots";
+import { formatWeatherTime, isWeatherMetric, weatherLegend, weatherMetrics } from "./weather";
+import type { WeatherForecast, WeatherMetric } from "./weather";
 
 interface Filters {
   region: RegionId | "";
@@ -32,6 +34,13 @@ function App() {
   const [refresh, setRefresh] = useState(0);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [observationsOpen, setObservationsOpen] = useState(true);
+  const [weatherMetric, setWeatherMetric] = useState<WeatherMetric>("");
+  const [weatherForecast, setWeatherForecast] = useState<WeatherForecast | null>(null);
+  const [weatherAt, setWeatherAt] = useState("");
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState("");
+  const [weatherReload, setWeatherReload] = useState(0);
+  const weatherForceRefresh = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,9 +76,64 @@ function App() {
     return () => controller.abort();
   }, [filters, refresh]);
 
+  useEffect(() => {
+    if (!weatherMetric) {
+      setWeatherForecast(null);
+      setWeatherError("");
+      setWeatherLoading(false);
+      weatherForceRefresh.current = false;
+      return;
+    }
+
+    const controller = new AbortController();
+    const params = new URLSearchParams();
+    if (filters.region) {
+      const [west, south, east, north] = regions[filters.region].bounds;
+      params.set("west", String(west));
+      params.set("south", String(south));
+      params.set("east", String(east));
+      params.set("north", String(north));
+    }
+    if (weatherAt) params.set("at", weatherAt);
+    if (weatherForceRefresh.current) {
+      params.set("refresh", "true");
+      weatherForceRefresh.current = false;
+    }
+
+    setWeatherLoading(true);
+    setWeatherError("");
+    fetch(`/api/weather/forecast?${params}`, { method: "POST", signal: controller.signal })
+      .then(async (response) => {
+        if (response.status === 422 && weatherAt) {
+          setWeatherAt("");
+          return null;
+        }
+        if (!response.ok) {
+          const error = await response.json() as { detail?: string };
+          throw new Error(error.detail ?? `Request failed (${response.status})`);
+        }
+        return response.json() as Promise<WeatherForecast>;
+      })
+      .then((data) => {
+        if (data) setWeatherForecast(data);
+      })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) {
+          setWeatherError(reason instanceof Error ? reason.message : "Unable to load forecast");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setWeatherLoading(false);
+      });
+    return () => controller.abort();
+  }, [filters, weatherAt, weatherMetric, weatherReload]);
+
   const hotspots = results?.items ?? [];
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId);
   const areaBounds = filters.region ? regions[filters.region].bounds : null;
+  const timelineValue = weatherAt || weatherForecast?.valid_at || "";
+  const timelineIndex = Math.max(0, weatherForecast?.times.indexOf(timelineValue) ?? 0);
+  const activeWeatherLegend = weatherLegend(weatherMetric);
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -123,19 +187,59 @@ function App() {
         <section className="content" aria-label="Hotspot dashboard">
           <div className="map-toolbar">
             <div className="map-title"><h2>Hotspots</h2><span>{filters.region ? regions[filters.region].label : "All areas"}</span></div>
-            <button className="refresh-button" type="button" onClick={() => setRefresh((value) => value + 1)}>Refresh data</button>
+            <div className="toolbar-actions">
+              <label className="weather-select">Weather layer
+                <select aria-label="Weather layer" value={weatherMetric} onChange={(event) => {
+                  if (isWeatherMetric(event.target.value)) setWeatherMetric(event.target.value);
+                }}>
+                  {weatherMetrics.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}
+                </select>
+              </label>
+              {weatherMetric && <button className="refresh-button" type="button" disabled={weatherLoading} onClick={() => {
+                weatherForceRefresh.current = true;
+                setWeatherReload((value) => value + 1);
+              }}>Refresh forecast</button>}
+              <button className="refresh-button" type="button" onClick={() => setRefresh((value) => value + 1)}>Refresh data</button>
+            </div>
           </div>
           <div className="map-summary">
             <span>Detections <strong>{loading || !results ? "—" : hotspots.length.toLocaleString()}</strong></span>
             <span>Latest <strong>{hotspots[0] ? formatUtc(hotspots[0].observed_at) : "—"}</strong></span>
             {results?.truncated && <span className="limit-label">Result limit reached</span>}
           </div>
+          {weatherMetric && weatherForecast && (
+            <div className="weather-timeline">
+              <label htmlFor="forecast-time">
+                Forecast time <output>{formatWeatherTime(timelineValue)}</output>
+              </label>
+              <input
+                id="forecast-time"
+                type="range"
+                min={0}
+                max={Math.max(0, weatherForecast.times.length - 1)}
+                value={timelineIndex}
+                disabled={weatherForecast.times.length < 2}
+                onChange={(event) => setWeatherAt(weatherForecast.times[Number(event.target.value)])}
+              />
+              <span>Retrieved {formatWeatherTime(weatherForecast.generated_at)}</span>
+            </div>
+          )}
+          {weatherLoading && <div className="map-message" role="status">Loading Open-Meteo forecast…</div>}
+          {weatherError && <div className="map-message map-error" role="alert">Could not load weather forecast: {weatherError}. Try again later.</div>}
           {loading && <div className="map-message" role="status">Loading observations…</div>}
           {error && <div className="map-message map-error" role="alert">Could not load observations: {error}. Check the API and try again.</div>}
           {!loading && !error && hotspots.length === 0 && <div className="map-message" role="status">No detections for these filters. Try a wider area or date range.</div>}
           {results?.truncated && <div className="notice" role="status">Showing the most recent 5,000 detections. Narrow your filters to see the rest.</div>}
           <div className="map-wrap">
-            <MapView hotspots={hotspots} bounds={areaBounds ?? DEFAULT_VIEW_BOUNDS} areaBounds={areaBounds} selectedId={selectedId} onSelect={(id) => { setSelectedId(id); setObservationsOpen(true); }} />
+            <MapView
+              hotspots={hotspots}
+              weatherPoints={weatherForecast?.items ?? []}
+              weatherMetric={weatherError ? "" : weatherMetric}
+              bounds={areaBounds ?? DEFAULT_VIEW_BOUNDS}
+              areaBounds={areaBounds}
+              selectedId={selectedId}
+              onSelect={(id) => { setSelectedId(id); setObservationsOpen(true); }}
+            />
           </div>
           <div className="map-footer">
             <div className="legend" role="group" aria-label="FRP legend, logarithmic scale, capped visually at 100 megawatts">
@@ -150,7 +254,14 @@ function App() {
               </div>
               <span className="legend-unavailable"><i style={{ backgroundColor: FRP_UNAVAILABLE_COLOR }} aria-hidden="true" /> Unavailable</span>
             </div>
+            {activeWeatherLegend && <div className="weather-legend" role="group" aria-label={`${weatherMetrics.find((metric) => metric.value === weatherMetric)?.label} forecast legend`}>
+              <span>{weatherMetrics.find((metric) => metric.value === weatherMetric)?.label}</span>
+              <span className="weather-ramp" style={{ background: activeWeatherLegend.gradient }} />
+              <span>{activeWeatherLegend.label}</span>
+              {weatherMetric === "wind" && <span>Arrows show downwind direction</span>}
+            </div>}
             {areaBounds && <span>Dashed outline: area filter</span>}
+            {weatherMetric && <span>Forecast by <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a>; forecasts do not indicate fire behavior.</span>}
             <span>FRP is radiated power, not fire severity or danger. Detections are not fire perimeters.</span>
           </div>
         </section>

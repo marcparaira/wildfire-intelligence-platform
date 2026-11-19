@@ -10,13 +10,12 @@
 flowchart TB
     subgraph External["External Data Sources"]
         FIRMS["NASA FIRMS API"]
-        WEATHER["Weather Forecast APIs"]
+        WEATHER["Open-Meteo Forecast API"]
         SAT["Satellite Imagery Providers"]
     end
 
     subgraph Ingestion["Data Ingestion"]
         FI["FIRMS Ingestor<br/>Python"]
-        WI["Weather Ingestor<br/>Python"]
         SI["Imagery Ingestor<br/>Python"]
     end
 
@@ -30,7 +29,7 @@ flowchart TB
     end
 
     subgraph Storage["Data Storage"]
-        DB[("PostgreSQL + PostGIS")]
+        DB[("PostgreSQL + PostGIS<br/>Detections and weather forecasts")]
         S3[("Amazon S3")]
     end
 
@@ -47,11 +46,9 @@ flowchart TB
     end
 
     FIRMS --> FI
-    WEATHER --> WI
     SAT --> SI
 
     FI --> KAFKA
-    WI --> KAFKA
     SI --> KAFKA
 
     KAFKA --> PROC
@@ -63,6 +60,7 @@ flowchart TB
 
     API <--> DB
     API <--> S3
+    WEATHER -->|"On-demand hourly forecasts"| API
 
     UI <-->|HTTPS / JSON| API
 
@@ -79,9 +77,9 @@ flowchart TB
 
 - **Frontend:** React with OpenLayers for mapping, weather overlays, and satellite visualization.
 - **Backend API:** FastAPI provides data access and business logic without coupling the frontend directly to storage.
-- **Ingestion:** Independent services retrieve data from external providers and publish events to Kafka.
+- **Ingestion:** FIRMS data is published to Kafka; the API fetches and caches Open-Meteo forecasts on demand.
 - **Processing:** Kafka consumers normalize, enrich, and persist geospatial information.
-- **Storage:** PostGIS handles spatial queries and structured data; S3 stores large imagery and raster datasets.
+- **Storage:** PostGIS handles spatial queries, detections, and hourly forecasts; S3 stores large imagery and raster datasets.
 - **Containers:** Each application service runs in its own Podman container, with separate build and runtime stages.
 - **Infrastructure:** AWS CDK manages infrastructure provisioning; infrastructure details are outside this code-level diagram.
 

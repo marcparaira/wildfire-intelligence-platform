@@ -2,10 +2,24 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Bounds, Hotspot } from "./hotspots";
+import type { WeatherPoint } from "./weather";
 
 vi.mock("./MapView", () => ({
-  default: ({ hotspots, bounds, areaBounds, onSelect }: { hotspots: Hotspot[]; bounds: Bounds; areaBounds: Bounds | null; onSelect: (id: number) => void }) => (
-    <div aria-label="Hotspot map" data-bounds={bounds.join(",")} data-area-bounds={areaBounds?.join(",") ?? ""}>
+  default: ({ hotspots, weatherPoints, weatherMetric, bounds, areaBounds, onSelect }: {
+    hotspots: Hotspot[];
+    weatherPoints: WeatherPoint[];
+    weatherMetric: string;
+    bounds: Bounds;
+    areaBounds: Bounds | null;
+    onSelect: (id: number) => void;
+  }) => (
+    <div
+      aria-label="Hotspot map"
+      data-bounds={bounds.join(",")}
+      data-area-bounds={areaBounds?.join(",") ?? ""}
+      data-weather-count={weatherPoints.length}
+      data-weather-metric={weatherMetric}
+    >
       {hotspots.map((hotspot) => (
         <button key={hotspot.id} onClick={() => onSelect(hotspot.id)}>Map point {hotspot.id}</button>
       ))}
@@ -173,5 +187,78 @@ describe("hotspot dashboard", () => {
     expect(screen.getByText("0 MW")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Map point 8" }));
     expect(screen.getByText("Fire radiative power").nextElementSibling).toHaveTextContent("Not provided");
+  });
+
+  it("loads a weather overlay and changes the displayed forecast hour on the timeline", async () => {
+    const forecast = {
+      generated_at: "2026-03-04T20:00:00Z",
+      valid_at: "2026-03-05T00:00:00Z",
+      times: ["2026-03-05T00:00:00Z", "2026-03-05T01:00:00Z"],
+      items: [{
+        latitude: 1,
+        longitude: 115,
+        west: 114,
+        south: 0,
+        east: 116,
+        north: 2,
+        temperature_c: 30,
+        precipitation_mm: 0,
+        wind_speed_kmh: 12,
+        wind_direction_degrees: 90,
+      }],
+    };
+    const fetchMock = vi.fn().mockImplementation(async (input: string) => ({
+      ok: true,
+      json: async () => input.startsWith("/api/weather")
+        ? forecast
+        : { items: [observation], truncated: false },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("0.523°, 114.123°");
+
+    fireEvent.change(screen.getByLabelText("Weather layer"), { target: { value: "temperature" } });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Hotspot map")).toHaveAttribute("data-weather-metric", "temperature");
+      expect(screen.getByLabelText("Hotspot map")).toHaveAttribute("data-weather-count", "1");
+    });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "POST" });
+    expect(await screen.findByText("2026-03-05 00:00 UTC", { selector: "output" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("slider", { name: /Forecast time/ }), {
+      target: { value: "1" },
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(String(fetchMock.mock.calls[2][0])).toContain("at=2026-03-05T01%3A00%3A00Z");
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh forecast" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(String(fetchMock.mock.calls[3][0])).toContain("refresh=true");
+
+    fireEvent.change(screen.getByLabelText("Weather layer"), { target: { value: "" } });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Hotspot map")).toHaveAttribute("data-weather-metric", "");
+      expect(screen.getByLabelText("Hotspot map")).toHaveAttribute("data-weather-count", "0");
+    });
+  });
+
+  it("shows the weather provider's retry guidance on rate limiting", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (input: string) => {
+      if (input.startsWith("/api/weather")) {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({ detail: "Open-Meteo rate limit reached; retry in 17 seconds." }),
+        };
+      }
+      return { ok: true, json: async () => ({ items: [], truncated: false }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("No detections for these filters. Try a wider area or date range.");
+
+    fireEvent.change(screen.getByLabelText("Weather layer"), { target: { value: "wind" } });
+
+    expect(await screen.findByText(/Open-Meteo rate limit reached; retry in 17 seconds/)).toBeInTheDocument();
   });
 });

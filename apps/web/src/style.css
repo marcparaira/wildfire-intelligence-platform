@@ -111,6 +111,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 .map-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .map-title h2 { margin: 0; font-size: 14px; font-weight: 650; }
 .map-title span { overflow: hidden; color: #596761; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-actions { display: flex; align-items: center; gap: 8px; }
+.weather-select { display: inline-flex; align-items: center; gap: 6px; color: #596761; white-space: nowrap; }
+.weather-select select {
+  height: 30px;
+  min-width: 130px;
+  padding: 0 6px;
+  color: #263a30;
+  border: 1px solid #aebbb4;
+  border-radius: 2px;
+  background: #fff;
+}
 .refresh-button { min-height: 30px; white-space: nowrap; }
 .map-summary {
   display: flex;
@@ -123,6 +134,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 }
 .map-summary strong { margin-left: 4px; color: #27332d; font-weight: 600; font-variant-numeric: tabular-nums; }
 .limit-label { color: #8d4a19; font-weight: 600; }
+.weather-timeline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #d7ddda;
+  color: #46564d;
+  font-size: 11px;
+}
+.weather-timeline label { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.weather-timeline output { color: #26322c; font-variant-numeric: tabular-nums; font-weight: 600; }
+.weather-timeline input { flex: 1 1 auto; min-width: 80px; accent-color: #315f7b; }
+.weather-timeline > span { white-space: nowrap; }
 .map-wrap { position: relative; flex: 1 1 auto; min-height: 0; background: #e2e8e2; }
 .map { width: 100%; height: 100%; }
 .map .ol-attribution { font-size: 10px; }
@@ -151,6 +175,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 .legend-ticks span:nth-child(2) { position: absolute; transform: translateX(-50%); }
 .legend-unavailable { display: inline-flex; align-items: center; gap: 4px; }
 .legend-unavailable i { box-shadow: 0 0 0 1px #66747b; }
+.weather-legend { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.weather-ramp { display: inline-block; width: 84px; height: 8px; border: 1px solid #82918a; border-radius: 1px; }
 .recent-item i { width: 9px; height: 9px; background: #e76c38; }
 
 .details { border-bottom: 1px solid #c8d0cd; }
@@ -195,6 +221,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
   .brand { margin-right: auto; }
   .brand span { display: none; }
   .workspace { display: flex; flex-direction: column; }
+  .map-toolbar { flex-wrap: wrap; }
+  .toolbar-actions { width: 100%; justify-content: space-between; }
   .sidebar, .detail-column { flex: none; overflow: visible; border: 0; }
   .sidebar[data-collapsed="true"], .detail-column[data-collapsed="true"] { flex-basis: auto; }
   .sidebar { border-bottom: 1px solid #c8d0cd; }
@@ -202,6 +230,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
   .sidebar .panel-toggle svg { transform: rotate(90deg); }
   .detail-column .panel-toggle svg { transform: rotate(-90deg); }
   .date-fields { grid-template-columns: 1fr 1fr; }
+  .weather-timeline { flex-wrap: wrap; }
+  .weather-timeline input { flex-basis: 100%; order: 1; }
   .content { flex: none; }
   .map-wrap { height: 60vh; min-height: 340px; flex: none; }
 }
