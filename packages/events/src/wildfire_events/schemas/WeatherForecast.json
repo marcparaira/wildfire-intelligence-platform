@@ -1,0 +1,127 @@
+{
+  "$defs": {
+    "HourlyWeather": {
+      "additionalProperties": false,
+      "properties": {
+        "precipitation_mm": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Precipitation Mm"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Temperature C"
+        },
+        "valid_at": {
+          "format": "date-time",
+          "title": "Valid At",
+          "type": "string"
+        },
+        "wind_direction_degrees": {
+          "anyOf": [
+            {
+              "maximum": 360,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Wind Direction Degrees"
+        },
+        "wind_speed_kmh": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Wind Speed Kmh"
+        }
+      },
+      "required": [
+        "valid_at",
+        "temperature_c",
+        "precipitation_mm",
+        "wind_speed_kmh",
+        "wind_direction_degrees"
+      ],
+      "title": "HourlyWeather",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Latest hourly forecast for one H3 cell; the compacted topic keeps one per cell.",
+  "properties": {
+    "cell": {
+      "description": "Resolution-2 H3 cell; also the Kafka message key",
+      "title": "Cell",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "hourly": {
+      "items": {
+        "$ref": "#/$defs/HourlyWeather"
+      },
+      "minItems": 1,
+      "title": "Hourly",
+      "type": "array"
+    },
+    "latitude": {
+      "description": "Cell center used for the forecast",
+      "maximum": 90,
+      "minimum": -90,
+      "title": "Latitude",
+      "type": "number"
+    },
+    "longitude": {
+      "maximum": 180,
+      "minimum": -180,
+      "title": "Longitude",
+      "type": "number"
+    },
+    "model": {
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "provider": {
+      "const": "open-meteo",
+      "title": "Provider",
+      "type": "string"
+    }
+  },
+  "required": [
+    "cell",
+    "latitude",
+    "longitude",
+    "provider",
+    "model",
+    "generated_at",
+    "hourly"
+  ],
+  "title": "WeatherForecast",
+  "type": "object"
+}

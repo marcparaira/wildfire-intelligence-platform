@@ -1,0 +1,97 @@
+{
+  "additionalProperties": false,
+  "description": "One satellite active-fire pixel from a NASA FIRMS NRT product.",
+  "properties": {
+    "attributes": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Provider CSV row, unmodified",
+      "title": "Attributes",
+      "type": "object"
+    },
+    "event_id": {
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "frp_mw": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Fire radiative power in MW",
+      "title": "Frp Mw"
+    },
+    "h3_cell": {
+      "description": "Resolution-2 H3 cell; also the Kafka message key",
+      "title": "H3 Cell",
+      "type": "string"
+    },
+    "ingested_at": {
+      "format": "date-time",
+      "title": "Ingested At",
+      "type": "string"
+    },
+    "instrument": {
+      "enum": [
+        "VIIRS",
+        "MODIS"
+      ],
+      "title": "Instrument",
+      "type": "string"
+    },
+    "latitude": {
+      "maximum": 90,
+      "minimum": -90,
+      "title": "Latitude",
+      "type": "number"
+    },
+    "longitude": {
+      "maximum": 180,
+      "minimum": -180,
+      "title": "Longitude",
+      "type": "number"
+    },
+    "observed_at": {
+      "format": "date-time",
+      "title": "Observed At",
+      "type": "string"
+    },
+    "product": {
+      "enum": [
+        "VIIRS_SNPP_NRT",
+        "VIIRS_NOAA20_NRT",
+        "VIIRS_NOAA21_NRT",
+        "MODIS_NRT"
+      ],
+      "title": "Product",
+      "type": "string"
+    },
+    "satellite": {
+      "maxLength": 32,
+      "minLength": 1,
+      "title": "Satellite",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_id",
+    "product",
+    "instrument",
+    "satellite",
+    "observed_at",
+    "latitude",
+    "longitude",
+    "h3_cell",
+    "attributes",
+    "ingested_at"
+  ],
+  "title": "FirmsDetection",
+  "type": "object"
+}

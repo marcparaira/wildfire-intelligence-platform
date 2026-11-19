@@ -33,6 +33,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_DIRS: /var/lib/kafka/data
     ports:
       - "127.0.0.1:${KAFKA_PORT:-19092}:9094"
@@ -71,18 +72,86 @@ services:
       retries: 5
       start_period: 10s
 
-  processor:
+  schema-registry:
+    image: ghcr.io/aiven-open/karapace:4.1.0
+    command: ["/bin/bash", "/opt/karapace/start.sh", "registry"]
+    environment:
+      KARAPACE_ADVERTISED_HOSTNAME: schema-registry
+      KARAPACE_BOOTSTRAP_URI: kafka:9092
+      KARAPACE_HOST: 0.0.0.0
+      KARAPACE_PORT: 8081
+      KARAPACE_TOPIC_NAME: _schemas
+      KARAPACE_COMPATIBILITY: BACKWARD
+      KARAPACE_LOG_LEVEL: WARNING
+    ports:
+      - "127.0.0.1:${SCHEMA_REGISTRY_PORT:-18081}:8081"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # The image has no curl or wget; issue the HTTP request with bash's /dev/tcp.
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081 && printf \"GET /subjects HTTP/1.0\\r\\n\\r\\n\" >&3 && head -n 1 <&3 | grep -q \" 200 \"'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.3.0
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      DYNAMIC_CONFIG_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${KAFKA_UI_PORT:-8090}:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+
+  ingestor:
     build:
-      context: ./services/firms-pipeline
-      dockerfile: Containerfile
+      context: .
+      dockerfile: services/ingestor/Containerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
+      FIRMS_PRODUCTS: ${FIRMS_PRODUCTS:-VIIRS_SNPP_NRT,VIIRS_NOAA20_NRT,VIIRS_NOAA21_NRT,MODIS_NRT}
+      FIRMS_DAYS: ${FIRMS_DAYS:-2}
+      FIRMS_INTERVAL_MINUTES: ${FIRMS_INTERVAL_MINUTES:-30}
+      WEATHER_INTERVAL_MINUTES: ${WEATHER_INTERVAL_MINUTES:-180}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sink-worker:
+    build:
+      context: .
+      dockerfile: services/sink-worker/Containerfile
     environment:
       DATABASE_URL: postgresql://wildfire:wildfire_dev@db:5432/wildfire
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
     depends_on:
       db:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    restart: unless-stopped
+
   web:
     build:
       context: ./apps/web

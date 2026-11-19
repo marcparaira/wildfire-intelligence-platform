@@ -64,7 +64,7 @@ flowchart LR
 | Source | `firms.detections`, `weather.forecasts` (compacted), `airquality.readings` |
 | User | `watch-areas` (compacted), `field-reports`, `alert-acks` |
 | Derived | `detections.enriched`, `fire.incidents`, `alerts`, `stats.hourly` |
-| Dead letter | One `*.dlq` topic per consuming service |
+| Dead letter | One `*.dlq` topic per consuming service (`sink-worker.dlq` today) |
 
 ## Architectural Principles
 
@@ -98,6 +98,9 @@ flowchart LR
   build and runtime stages.
 - **Infrastructure:** AWS CDK manages infrastructure provisioning;
   infrastructure details are outside this code-level diagram.
+
+Topic keys, schemas, dead-letter handling, and the replay procedure are
+documented in [the event pipeline operations guide](../operations/event-pipeline.md).
 
 ## Open Design Questions
 

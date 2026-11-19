@@ -29,12 +29,15 @@ vi.mock("./MapView", () => ({
 
 const observation: Hotspot = {
   id: 7,
+  event_id: "6a1f8f4e-7d0c-5a6e-9c1d-2b3e4f5a6b7c",
   source: "VIIRS_NOAA20_NRT",
+  instrument: "VIIRS",
   satellite: "N20",
   observed_at: "2026-03-05T00:07:00Z",
   latitude: 0.5234,
   longitude: 114.1234,
   attributes: { confidence: "nominal", frp: "12.5", daynight: "N" },
+  duplicate_of: null,
 };
 
 afterEach(() => {
@@ -192,15 +195,15 @@ describe("hotspot dashboard", () => {
   it("loads a weather overlay and changes the displayed forecast hour on the timeline", async () => {
     const forecast = {
       generated_at: "2026-03-04T20:00:00Z",
+      oldest_generated_at: "2026-03-04T19:00:00Z",
       valid_at: "2026-03-05T00:00:00Z",
       times: ["2026-03-05T00:00:00Z", "2026-03-05T01:00:00Z"],
       items: [{
+        cell: "82654ffffffffff",
         latitude: 1,
         longitude: 115,
-        west: 114,
-        south: 0,
-        east: 116,
-        north: 2,
+        boundary: [[114, 0], [116, 0], [116, 2], [114, 2], [114, 0]],
+        generated_at: "2026-03-04T20:00:00Z",
         temperature_c: 30,
         precipitation_mm: 0,
         wind_speed_kmh: 12,
@@ -222,7 +225,9 @@ describe("hotspot dashboard", () => {
       expect(screen.getByLabelText("Hotspot map")).toHaveAttribute("data-weather-metric", "temperature");
       expect(screen.getByLabelText("Hotspot map")).toHaveAttribute("data-weather-count", "1");
     });
-    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "POST" });
+    expect(fetchMock.mock.calls[1][1]).not.toHaveProperty("method");
+    expect(screen.getByText("Forecast retrieved 2026-03-04 20:00 UTC")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh forecast" })).not.toBeInTheDocument();
     expect(await screen.findByText("2026-03-05 00:00 UTC", { selector: "output" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("slider", { name: /Forecast time/ }), {
@@ -231,9 +236,12 @@ describe("hotspot dashboard", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(String(fetchMock.mock.calls[2][0])).toContain("at=2026-03-05T01%3A00%3A00Z");
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh forecast" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    expect(String(fetchMock.mock.calls[3][0])).toContain("refresh=true");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh data" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    expect(fetchMock.mock.calls.slice(3).map(([url]) => String(url).split("?")[0]).sort()).toEqual([
+      "/api/hotspots",
+      "/api/weather/forecast",
+    ]);
 
     fireEvent.change(screen.getByLabelText("Weather layer"), { target: { value: "" } });
     await waitFor(() => {
@@ -242,13 +250,13 @@ describe("hotspot dashboard", () => {
     });
   });
 
-  it("shows the weather provider's retry guidance on rate limiting", async () => {
+  it("explains when no forecast has been ingested yet", async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: string) => {
       if (input.startsWith("/api/weather")) {
         return {
           ok: false,
           status: 503,
-          json: async () => ({ detail: "Open-Meteo rate limit reached; retry in 17 seconds." }),
+          json: async () => ({ detail: "No weather forecast has been ingested yet" }),
         };
       }
       return { ok: true, json: async () => ({ items: [], truncated: false }) };
@@ -259,6 +267,6 @@ describe("hotspot dashboard", () => {
 
     fireEvent.change(screen.getByLabelText("Weather layer"), { target: { value: "wind" } });
 
-    expect(await screen.findByText(/Open-Meteo rate limit reached; retry in 17 seconds/)).toBeInTheDocument();
+    expect(await screen.findByText(/No weather forecast has been ingested yet/)).toBeInTheDocument();
   });
 });

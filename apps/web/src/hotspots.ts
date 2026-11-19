@@ -1,11 +1,14 @@
 export interface Hotspot {
   id: number;
+  event_id: string;
   source: string;
+  instrument: string;
   satellite: string;
   observed_at: string;
   latitude: number;
   longitude: number;
   attributes: Record<string, string>;
+  duplicate_of: string | null;
 }
 
 export interface HotspotResults {

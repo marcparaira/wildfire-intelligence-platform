@@ -3,7 +3,7 @@ import Feature from "ol/Feature";
 import Map from "ol/Map";
 import View from "ol/View";
 import Point from "ol/geom/Point";
-import { fromExtent } from "ol/geom/Polygon";
+import Polygon, { fromExtent } from "ol/geom/Polygon";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import { fromLonLat, transformExtent } from "ol/proj";
@@ -87,13 +87,7 @@ export default function MapView({
       const value = weatherValue(point, weatherMetric);
       if (value === null) continue;
       const feature = new Feature({
-        geometry: fromExtent(
-          transformExtent(
-            [point.west, point.south, point.east, point.north],
-            "EPSG:4326",
-            "EPSG:3857",
-          ),
-        ),
+        geometry: new Polygon([point.boundary.map((coordinate) => fromLonLat(coordinate))]),
       });
       feature.setStyle(
         new Style({

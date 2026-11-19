@@ -3,14 +3,16 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wildfire-firms-pipeline"
-version = "0.1.0"
-description = "FIRMS ingestion and PostGIS processing"
+name = "wildfire-sink-worker"
+version = "0.2.0"
+description = "Kafka-to-PostGIS projections"
 requires-python = ">=3.12"
 dependencies = [
+    "wildfire-events",
+    "h3>=4.2,<5",
     "kafka-python>=2.2,<3",
-    "psycopg[binary]>=3.2,<4",
     "pydantic>=2.10,<3",
+    "psycopg[binary]>=3.2,<4",
 ]
 
 [project.optional-dependencies]
@@ -19,11 +21,11 @@ dev = [
     "ruff>=0.9,<1",
 ]
 
+[project.scripts]
+wildfire-sink-worker = "wildfire_sink.service:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-wildfire_firms = ["data/*.geojson"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -34,3 +36,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["wildfire_events", "wildfire_sink"]
