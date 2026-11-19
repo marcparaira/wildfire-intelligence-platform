@@ -1,19 +1,47 @@
 """Publishing events through the schema-registry codec with an idempotent producer."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
-from kafka import KafkaProducer
 from pydantic import BaseModel
 
-from wildfire_events.codec import EventCodec
 from wildfire_ingestor.log import EVENT_ID_HEADER, PublishedEvents
+
+
+class EventEncoder[T: BaseModel](Protocol):
+    """Encodes an event as a record value; ``EventCodec`` implements it."""
+
+    def encode(self, event: T) -> bytes: ...
+
+
+class PublishedRecord(Protocol):
+    @property
+    def timestamp(self) -> int: ...
+
+
+class SendResult(Protocol):
+    def get(self, timeout: float | None = None) -> PublishedRecord: ...
+
+
+class RecordSender(Protocol):
+    """The part of ``KafkaProducer`` the publisher uses."""
+
+    def send(
+        self,
+        topic: str,
+        value: object = None,
+        key: object = None,
+        headers: Sequence[tuple[str, bytes]] | None = None,
+    ) -> SendResult: ...
+
+    def flush(self, timeout: float | None = None) -> None: ...
 
 
 @dataclass
 class Publisher[T: BaseModel]:
-    producer: KafkaProducer
-    codec: EventCodec[T]
+    producer: RecordSender
+    codec: EventEncoder[T]
     topic: str
     key: Callable[[T], str]
     event_id: Callable[[T], object] | None = None
@@ -21,7 +49,7 @@ class Publisher[T: BaseModel]:
 
     def publish(self, events: Iterable[T]) -> tuple[int, int]:
         """Publish events not already in the topic; return (published, skipped)."""
-        pending = []
+        pending: list[tuple[str | None, SendResult]] = []
         skipped = 0
         batch_ids: set[str] = set()
         for event in events:

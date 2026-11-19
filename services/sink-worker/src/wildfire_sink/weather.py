@@ -8,7 +8,7 @@ A tombstone (null value) removes the cell.
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import LiteralString
 
 import psycopg
 from kafka.consumer.fetcher import ConsumerRecord
@@ -18,8 +18,9 @@ from wildfire_events.codec import EventCodec
 from wildfire_events.models import WeatherForecast
 from wildfire_events.registry import SchemaRegistry
 from wildfire_events.topics import WEATHER_FORECASTS, value_subject
+from wildfire_sink.runner import record_key
 
-SCHEMA = [
+SCHEMA: list[LiteralString] = [
     """
     CREATE TABLE IF NOT EXISTS weather_cells (
         cell text PRIMARY KEY,
@@ -92,16 +93,19 @@ class WeatherProjection:
     def initialize(self, connection: psycopg.Connection) -> None:
         with connection.transaction():
             for statement in SCHEMA:
-                connection.execute(statement)
+                _ = connection.execute(statement)
 
     def apply(
-        self, connection: psycopg.Connection, events: Sequence[tuple[ConsumerRecord, Any]]
+        self,
+        connection: psycopg.Connection,
+        events: Sequence[tuple[ConsumerRecord, WeatherForecast | None]],
     ) -> None:
         for record, forecast in events:
             if forecast is None:
-                if record.key:
-                    connection.execute(
-                        "DELETE FROM weather_cells WHERE cell = %s", (record.key.decode(),)
+                key = record_key(record)
+                if key:
+                    _ = connection.execute(
+                        "DELETE FROM weather_cells WHERE cell = %s", (key.decode(),)
                     )
                 continue
             updated = connection.execute(
@@ -118,7 +122,7 @@ class WeatherProjection:
             ).fetchone()
             if updated is None:
                 continue
-            connection.execute("DELETE FROM weather_hourly WHERE cell = %s", (forecast.cell,))
+            _ = connection.execute("DELETE FROM weather_hourly WHERE cell = %s", (forecast.cell,))
             with connection.cursor() as cursor:
                 cursor.executemany(
                     INSERT_HOUR,

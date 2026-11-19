@@ -3,6 +3,7 @@
 import logging
 import time
 from collections.abc import Iterable
+from typing import cast
 
 from kafka import KafkaAdminClient, KafkaProducer
 from kafka.admin import NewTopic
@@ -33,7 +34,7 @@ def ensure_topics(bootstrap_servers: str, specs: Iterable[TopicSpec]) -> None:
         missing = [spec for spec in specs if spec.name not in existing]
         for spec in missing:
             try:
-                admin.create_topics(
+                admin.create_topics(  # pyright: ignore[reportUnknownMemberType] -- untyped in kafka-python
                     [
                         NewTopic(
                             name=spec.name,
@@ -49,7 +50,7 @@ def ensure_topics(bootstrap_servers: str, specs: Iterable[TopicSpec]) -> None:
         for spec in specs:
             if spec.name in existing:
                 described = admin.describe_topics([spec.name])[0]
-                partitions = len(described.get("partitions", []))
+                partitions = len(cast(list[object], described.get("partitions", [])))
                 if partitions != spec.partitions:
                     LOGGER.warning(
                         "Topic %s has %d partitions; expected %d (co-partitioning is broken)",

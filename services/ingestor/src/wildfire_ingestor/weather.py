@@ -1,18 +1,19 @@
 """Open-Meteo hourly forecast producer for the H3 forecast grid."""
 
-import json
 import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from functools import cache
+from http.client import HTTPResponse
+from typing import cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
 import h3
-from pydantic import ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from wildfire_events.cells import cells_covering
 from wildfire_events.models import HourlyWeather, WeatherForecast
@@ -35,9 +36,25 @@ class ForecastCell:
     longitude: float
 
 
+class OpenMeteoHourly(BaseModel):
+    time: list[str]
+    temperature_2m: list[float | None]
+    precipitation: list[float | None]
+    wind_speed_10m: list[float | None]
+    wind_direction_10m: list[float | None]
+
+
+class OpenMeteoLocation(BaseModel):
+    hourly: OpenMeteoHourly
+
+
+# One location is returned as an object, several as a list of objects.
+_PAYLOAD = TypeAdapter(list[object] | dict[str, object])
+
+
 @cache
 def forecast_cells() -> tuple[ForecastCell, ...]:
-    cells = []
+    cells: list[ForecastCell] = []
     for cell in cells_covering(*REGION_BOUNDS):
         latitude, longitude = h3.cell_to_latlng(cell)
         cells.append(ForecastCell(cell, round(latitude, 4), round(longitude, 4)))
@@ -64,10 +81,17 @@ def _utc(value: str) -> datetime:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
-def parse_location(cell: ForecastCell, location: dict, generated_at: datetime) -> WeatherForecast:
-    hourly = location["hourly"]
-    times = hourly["time"]
-    series = [hourly[name] for name in HOURLY_VARIABLES]
+def parse_location(
+    cell: ForecastCell, location: object, generated_at: datetime
+) -> WeatherForecast:
+    hourly = OpenMeteoLocation.model_validate(location).hourly
+    times = hourly.time
+    series = [
+        hourly.temperature_2m,
+        hourly.precipitation,
+        hourly.wind_speed_10m,
+        hourly.wind_direction_10m,
+    ]
     if any(len(values) != len(times) for values in series):
         raise ValueError("forecast values do not match the hourly timeline")
     return WeatherForecast(
@@ -102,20 +126,21 @@ def fetch_chunk(cells: list[ForecastCell], generated_at: datetime) -> list[Weath
         "precipitation_unit": "mm",
     }
     try:
-        with urlopen(f"{OPEN_METEO_URL}?{urlencode(parameters)}", timeout=60) as response:
-            payload = json.loads(response.read())
+        url = f"{OPEN_METEO_URL}?{urlencode(parameters)}"
+        with cast(HTTPResponse, urlopen(url, timeout=60)) as response:
+            payload = _PAYLOAD.validate_json(response.read())
     except HTTPError as exc:
         if exc.code == 429:
             seconds = _retry_after_seconds(exc.headers.get("Retry-After"))
             raise RetryLater("Open-Meteo rate limit reached", seconds) from exc
         raise RuntimeError(f"Open-Meteo request failed with HTTP {exc.code}") from exc
-    except (URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (URLError, TimeoutError, OSError, UnicodeDecodeError, ValidationError) as exc:
         raise RuntimeError(f"Open-Meteo request failed: {type(exc).__name__}") from exc
 
-    locations = payload if isinstance(payload, list) else [payload]
+    locations: list[object] = payload if isinstance(payload, list) else [payload]
     if len(locations) != len(cells):
         raise RuntimeError("Open-Meteo returned an unexpected number of locations")
-    forecasts = []
+    forecasts: list[WeatherForecast] = []
     for cell, location in zip(cells, locations, strict=True):
         try:
             forecasts.append(parse_location(cell, location, generated_at))

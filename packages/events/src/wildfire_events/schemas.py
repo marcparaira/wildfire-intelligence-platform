@@ -34,7 +34,7 @@ def main() -> None:
     for model in SUBJECT_MODELS.values():
         path = root.joinpath(f"{model.__name__}.json")
         with open(str(path), "w", encoding="utf-8") as handle:
-            handle.write(generate(model))
+            _ = handle.write(generate(model))
         print(f"wrote {path}", file=sys.stderr)
 
 

@@ -17,7 +17,8 @@ Deduplication happens at two levels:
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any
+from typing import LiteralString
+from uuid import UUID
 
 import psycopg
 from kafka.consumer.fetcher import ConsumerRecord
@@ -33,7 +34,7 @@ MATCH_WINDOW = timedelta(minutes=20)
 SENSOR_RANK = {"VIIRS": 0, "MODIS": 1}
 TABLE = "fire_detections"
 
-SCHEMA = [
+SCHEMA: list[LiteralString] = [
     f"""
     CREATE TABLE IF NOT EXISTS {TABLE} (
         id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -125,24 +126,28 @@ class DetectionProjection:
     def initialize(self, connection: psycopg.Connection) -> None:
         with connection.transaction():
             for statement in SCHEMA:
-                connection.execute(statement)
+                _ = connection.execute(statement)
 
     def apply(
-        self, connection: psycopg.Connection, events: Sequence[tuple[ConsumerRecord, Any]]
+        self,
+        connection: psycopg.Connection,
+        events: Sequence[tuple[ConsumerRecord, FirmsDetection | None]],
     ) -> None:
-        inserted = []
+        inserted: list[UUID] = []
         for _, event in events:
+            if event is None:  # never delivered: this projection does not accept tombstones
+                continue
             row = connection.execute(INSERT, row_parameters(event)).fetchone()
             if row is not None:
                 inserted.append(event.event_id)
         for event_id in inserted:
-            parameters = {
+            parameters: dict[str, object] = {
                 "event_id": event_id,
                 "window": MATCH_WINDOW,
                 "meters": MATCH_DISTANCE_METERS,
             }
-            connection.execute(POINT_NEW_TO_BEST_MATCH, parameters)
-            connection.execute(POINT_WORSE_MATCHES_TO_NEW, parameters)
+            _ = connection.execute(POINT_NEW_TO_BEST_MATCH, parameters)
+            _ = connection.execute(POINT_WORSE_MATCHES_TO_NEW, parameters)
 
 
 def row_parameters(event: FirmsDetection) -> dict[str, object]:

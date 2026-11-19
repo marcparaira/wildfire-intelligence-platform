@@ -8,31 +8,35 @@ schema, topics, consumer groups, and registry subjects, and removes them.
 import os
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
+from http.client import HTTPResponse
 from threading import Event, Thread
-from types import SimpleNamespace
+from typing import cast
 from urllib.request import Request, urlopen
 
 import psycopg
 import pytest
 from kafka import KafkaConsumer
 from kafka.admin import KafkaAdminClient, NewTopic
+from kafka.consumer.fetcher import ConsumerRecord
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
+from pydantic import BaseModel
 
 from wildfire_events.cells import partition_cell
 from wildfire_events.kafka import idempotent_producer
 from wildfire_events.models import (
     FIRMS_PRODUCTS,
     FirmsDetection,
+    FirmsProduct,
     HourlyWeather,
     WeatherForecast,
     detection_event_id,
 )
 from wildfire_events.registry import SchemaRegistry
 from wildfire_sink.detections import DetectionProjection
-from wildfire_sink.runner import DeadLetters, ProjectionWorker
+from wildfire_sink.runner import DeadLetters, Projection, ProjectionWorker, record_value
 from wildfire_sink.weather import WeatherProjection
 
 DATABASE_URL = os.environ.get("SINK_TEST_DATABASE_URL", "")
@@ -48,7 +52,7 @@ needs_stack = pytest.mark.skipif(
 
 
 def detection(
-    product: str, satellite: str, minutes: int, latitude: float, longitude: float
+    product: FirmsProduct, satellite: str, minutes: int, latitude: float, longitude: float
 ) -> FirmsDetection:
     observed_at = T0 + timedelta(minutes=minutes)
     return FirmsDetection(
@@ -82,18 +86,38 @@ BEST_FOR_AQUA = min(SNPP.event_id, SNPP_NEIGHBOR.event_id)
 def schema_url() -> Iterator[str]:
     schema = f"sink_test_{uuid.uuid4().hex}"
     with psycopg.connect(DATABASE_URL, autocommit=True) as admin:
-        admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        _ = admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
         try:
             yield make_conninfo(DATABASE_URL, options=f"-csearch_path={schema},public")
         finally:
-            admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+            _ = admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
 
-def project(url: str, projection: object, events: list) -> None:
+def record(key: bytes | None = None) -> ConsumerRecord:
+    return ConsumerRecord(
+        topic="test",
+        partition=0,
+        leader_epoch=None,
+        offset=0,
+        timestamp=0,
+        timestamp_type=0,
+        key=key,
+        value=None,
+        headers=[],
+        checksum=None,
+        serialized_key_size=-1,
+        serialized_value_size=-1,
+        serialized_header_size=-1,
+    )
+
+
+def project[E: BaseModel](
+    url: str, projection: Projection[E], events: Sequence[tuple[ConsumerRecord, E | None]]
+) -> None:
     with psycopg.connect(url, autocommit=True) as connection:
-        projection.initialize(connection)  # type: ignore[attr-defined]
+        projection.initialize(connection)
         with connection.transaction():
-            projection.apply(connection, events)  # type: ignore[attr-defined]
+            projection.apply(connection, events)
 
 
 def duplicates(url: str) -> dict[uuid.UUID, uuid.UUID | None]:
@@ -108,8 +132,8 @@ def test_cross_sensor_duplicates_are_marked_independently_of_arrival_order(
 ) -> None:
     projection = DetectionProjection(SchemaRegistry("http://unused"))
     for index in order:
-        project(schema_url, projection, [(None, DETECTIONS[index])])
-    project(schema_url, projection, [(None, AQUA), (None, SNPP)])  # redelivery is a no-op
+        project(schema_url, projection, [(record(), DETECTIONS[index])])
+    project(schema_url, projection, [(record(), AQUA), (record(), SNPP)])  # redelivery: no-op
 
     assert duplicates(schema_url) == {
         AQUA.event_id: BEST_FOR_AQUA,
@@ -152,17 +176,16 @@ def forecast(generated_hours: int, temperature: float) -> WeatherForecast:
 def test_weather_keeps_only_the_newest_forecast_per_cell(schema_url: str) -> None:
     projection = WeatherProjection(SchemaRegistry("http://unused"))
     newer, older = forecast(6, 30.0), forecast(0, 20.0)
-    project(schema_url, projection, [(None, newer), (None, older)])
+    project(schema_url, projection, [(record(), newer), (record(), older)])
     with psycopg.connect(schema_url) as connection:
         rows = connection.execute(
             "SELECT h.valid_at, h.temperature_c, ST_NPoints(c.boundary) "
-            "FROM weather_hourly h JOIN weather_cells c USING (cell) ORDER BY h.valid_at"
+            + "FROM weather_hourly h JOIN weather_cells c USING (cell) ORDER BY h.valid_at"
         ).fetchall()
     assert [row[1] for row in rows] == [30.0, 30.0, 30.0]
     assert rows[0][0] == newer.generated_at and rows[0][2] == 7
 
-    tombstone = SimpleNamespace(key=newer.cell.encode())
-    project(schema_url, projection, [(tombstone, None)])
+    project(schema_url, projection, [(record(key=newer.cell.encode()), None)])
     with psycopg.connect(schema_url) as connection:
         assert connection.execute("SELECT count(*) FROM weather_hourly").fetchone() == (0,)
 
@@ -170,7 +193,9 @@ def test_weather_keeps_only_the_newest_forecast_per_cell(schema_url: str) -> Non
 def _delete_subject(subject: str) -> None:
     for suffix in ("", "?permanent=true"):
         try:
-            urlopen(Request(f"{REGISTRY}/subjects/{subject}{suffix}", method="DELETE"), timeout=10)
+            request = Request(f"{REGISTRY}/subjects/{subject}{suffix}", method="DELETE")
+            with cast(HTTPResponse, urlopen(request, timeout=10)):
+                pass
         except OSError:
             pass
 
@@ -180,17 +205,19 @@ def test_events_flow_from_kafka_to_postgis_with_dead_letters_and_replay(schema_u
     suffix = uuid.uuid4().hex[:12]
     topic, dlq = f"sink-test-{suffix}", f"sink-test-{suffix}.dlq"
     admin = KafkaAdminClient(bootstrap_servers=KAFKA)
-    admin.create_topics([NewTopic(topic, 6, 1), NewTopic(dlq, 1, 1)])
+    admin.create_topics([NewTopic(topic, 6, 1), NewTopic(dlq, 1, 1)])  # pyright: ignore[reportUnknownMemberType]
     registry = SchemaRegistry(REGISTRY)
     producer = idempotent_producer(KAFKA, "sink-test")
     try:
         projection = DetectionProjection(registry, topic=topic, group_id=f"sink-test-{suffix}")
         for event in DETECTIONS:
-            producer.send(topic, key=event.h3_cell.encode(), value=projection.codec.encode(event))
+            _ = producer.send(
+                topic, key=event.h3_cell.encode(), value=projection.codec.encode(event)
+            )
         bad_key = AQUA.h3_cell.encode()
-        producer.send(topic, key=bad_key, value=b"not an event")
-        producer.send(topic, key=bad_key, value=b"\x00\x00\x0f\xff\xff{}")
-        producer.send(topic, key=bad_key, value=projection.codec.encode(SNPP))  # duplicate
+        _ = producer.send(topic, key=bad_key, value=b"not an event")
+        _ = producer.send(topic, key=bad_key, value=b"\x00\x00\x0f\xff\xff{}")
+        _ = producer.send(topic, key=bad_key, value=projection.codec.encode(SNPP))  # duplicate
         producer.flush()
 
         def run(group_id: str) -> None:
@@ -222,8 +249,9 @@ def test_events_flow_from_kafka_to_postgis_with_dead_letters_and_replay(schema_u
                                  consumer_timeout_ms=10000)
         dead = [next(consumer), next(consumer)]
         consumer.close()
-        headers = [dict(record.headers) for record in dead]
-        assert [record.value for record in dead] == [b"not an event", b"\x00\x00\x0f\xff\xff{}"]
+        headers = [dict(dead_record.headers) for dead_record in dead]
+        dead_values = [record_value(dead_record) for dead_record in dead]
+        assert dead_values == [b"not an event", b"\x00\x00\x0f\xff\xff{}"]
         assert headers[0]["dlq.original.topic"] == topic.encode()
         assert headers[0]["dlq.consumer.group"] == f"sink-test-{suffix}".encode()
         assert b"too short" in headers[0]["dlq.error"] or b"magic" in headers[0]["dlq.error"]
@@ -231,11 +259,11 @@ def test_events_flow_from_kafka_to_postgis_with_dead_letters_and_replay(schema_u
 
         # Rebuild: drop the projection and replay the topic with a fresh consumer group.
         with psycopg.connect(schema_url, autocommit=True) as connection:
-            connection.execute("DROP TABLE fire_detections")
+            _ = connection.execute("DROP TABLE fire_detections")
         run(f"sink-test-{suffix}-replay")
         assert duplicates(schema_url) == first
     finally:
         producer.close()
-        admin.delete_topics([topic, dlq])
+        admin.delete_topics([topic, dlq])  # pyright: ignore[reportUnknownMemberType]
         admin.close()
         _delete_subject(f"{topic}-value")

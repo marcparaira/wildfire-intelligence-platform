@@ -1,0 +1,48 @@
+# Development workspace root. Not a package and never built or deployed:
+# it only lets `uv sync` install every Python subproject (editable) plus the
+# shared dev tools into a single .venv at the repository root.
+# Containerfiles and CI install each subproject from its own pyproject with pip.
+[project]
+name = "wildfire-intelligence-platform"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "wildfire-events",
+    "wildfire-api",
+    "wildfire-ingestor",
+    "wildfire-sink-worker",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28,<1.0",
+    "pytest>=8.3,<9",
+    "ruff>=0.9,<1",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "packages/events",
+    "apps/api",
+    "services/ingestor",
+    "services/sink-worker",
+]
+
+# Sources declared at the workspace root apply to every member, so the
+# ingestor and sink-worker resolve wildfire-events from packages/events.
+[tool.uv.sources]
+wildfire-events = { workspace = true }
+wildfire-api = { workspace = true }
+wildfire-ingestor = { workspace = true }
+wildfire-sink-worker = { workspace = true }
+
+[tool.basedpyright]
+include = ["packages/events", "apps/api", "services/ingestor", "services/sink-worker"]
+exclude = ["**/__pycache__", "**/.venv", "**/node_modules"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "recommended"

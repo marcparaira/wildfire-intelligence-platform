@@ -12,7 +12,7 @@ FAILURE_RETRY_SECONDS = 300.0
 class RetryLater(RuntimeError):
     def __init__(self, message: str, seconds: float) -> None:
         super().__init__(message)
-        self.seconds = seconds
+        self.seconds: float = seconds
 
 
 @dataclass

@@ -6,11 +6,12 @@ ID is not registered under the expected subject or whose JSON fails validation.
 """
 
 import struct
+from typing import cast
 
 from pydantic import BaseModel, ValidationError
 
 from wildfire_events import schemas
-from wildfire_events.registry import SchemaRegistry
+from wildfire_events.registry import SubjectRegistry
 
 MAGIC_BYTE = 0
 HEADER = struct.Struct(">bI")
@@ -21,10 +22,10 @@ class InvalidEvent(ValueError):
 
 
 class EventCodec[T: BaseModel]:
-    def __init__(self, model: type[T], subject: str, registry: SchemaRegistry) -> None:
-        self.model = model
-        self.subject = subject
-        self.registry = registry
+    def __init__(self, model: type[T], subject: str, registry: SubjectRegistry) -> None:
+        self.model: type[T] = model
+        self.subject: str = subject
+        self.registry: SubjectRegistry = registry
         self._schema_id: int | None = None
 
     @property
@@ -43,7 +44,7 @@ class EventCodec[T: BaseModel]:
             raise InvalidEvent("record has no value")
         if len(value) <= HEADER.size:
             raise InvalidEvent("record is too short for the schema-registry wire format")
-        magic, schema_id = HEADER.unpack_from(value)
+        magic, schema_id = cast(tuple[int, int], HEADER.unpack_from(value))
         if magic != MAGIC_BYTE:
             raise InvalidEvent(f"unknown wire-format magic byte {magic}")
         if self.subject not in self.registry.subjects_for(schema_id):

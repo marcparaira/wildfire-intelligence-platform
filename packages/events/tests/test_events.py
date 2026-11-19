@@ -62,7 +62,7 @@ def test_event_id_is_stable_across_coordinate_formatting_and_time_zones() -> Non
     assert first == detection_event_id("MODIS_NRT", " Aqua", plus_seven, "0.52340", "114.12340")
     assert first != detection_event_id("MODIS_NRT", "Terra", OBSERVED, "0.5234", "114.1234")
     with pytest.raises(ValueError):
-        detection_event_id("MODIS_NRT", "Aqua", OBSERVED, "nan", "114")
+        _ = detection_event_id("MODIS_NRT", "Aqua", OBSERVED, "nan", "114")
 
 
 @pytest.mark.parametrize(
@@ -78,7 +78,7 @@ def test_event_id_is_stable_across_coordinate_formatting_and_time_zones() -> Non
 )
 def test_detection_rejects_inconsistent_events(changes: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        detection(**changes)
+        _ = detection(**changes)
 
 
 def test_weather_forecast_requires_partition_cell_and_ordered_hours() -> None:
@@ -100,9 +100,9 @@ def test_weather_forecast_requires_partition_cell_and_ordered_hours() -> None:
     }
     assert WeatherForecast.model_validate(values).cell == values["cell"]
     with pytest.raises(ValidationError):
-        WeatherForecast.model_validate({**values, "hourly": [hour, hour]})
+        _ = WeatherForecast.model_validate({**values, "hourly": [hour, hour]})
     with pytest.raises(ValidationError):
-        WeatherForecast.model_validate({**values, "cell": "8928308280fffff"})
+        _ = WeatherForecast.model_validate({**values, "cell": "8928308280fffff"})
 
 
 def test_codec_round_trip_uses_confluent_wire_format() -> None:
@@ -129,9 +129,9 @@ def test_codec_rejects_invalid_records(value: bytes | None, message: str) -> Non
     registry = FakeRegistry()
     codec = EventCodec(FirmsDetection, "firms.detections-value", registry)
     assert codec.schema_id == 1
-    registry.register("weather.forecasts-value", schemas.load(WeatherForecast))
+    _ = registry.register("weather.forecasts-value", schemas.load(WeatherForecast))
     with pytest.raises(InvalidEvent, match=message):
-        codec.decode(value)
+        _ = codec.decode(value)
 
 
 def test_region_cells_have_closed_boundaries() -> None:

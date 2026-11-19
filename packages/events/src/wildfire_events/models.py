@@ -8,7 +8,7 @@ optional fields with defaults, never remove, rename, or retype fields.
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Literal
+from typing import ClassVar, Literal, TypeGuard
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -17,12 +17,16 @@ from wildfire_events.cells import is_partition_cell, partition_cell
 FirmsProduct = Literal["VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT", "MODIS_NRT"]
 Instrument = Literal["VIIRS", "MODIS"]
 
-FIRMS_PRODUCTS: dict[str, Instrument] = {
+FIRMS_PRODUCTS: dict[FirmsProduct, Instrument] = {
     "VIIRS_SNPP_NRT": "VIIRS",
     "VIIRS_NOAA20_NRT": "VIIRS",
     "VIIRS_NOAA21_NRT": "VIIRS",
     "MODIS_NRT": "MODIS",
 }
+
+def is_firms_product(value: str) -> TypeGuard[FirmsProduct]:
+    return value in FIRMS_PRODUCTS
+
 
 _EVENT_NAMESPACE = uuid.UUID("6f1d4a52-3c1e-4d55-9a7e-1f0c6b8f2a10")
 
@@ -65,7 +69,9 @@ def detection_event_id(
 class FirmsDetection(BaseModel):
     """One satellite active-fire pixel from a NASA FIRMS NRT product."""
 
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, title="FirmsDetection")
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid", allow_inf_nan=False, title="FirmsDetection"
+    )
 
     event_id: uuid.UUID
     product: FirmsProduct
@@ -79,7 +85,10 @@ class FirmsDetection(BaseModel):
     attributes: dict[str, str] = Field(description="Provider CSV row, unmodified")
     ingested_at: AwareDatetime
 
-    _normalize_times = field_validator("observed_at", "ingested_at")(_utc)
+    @field_validator("observed_at", "ingested_at")
+    @classmethod
+    def _normalize_times(cls, value: datetime) -> datetime:
+        return _utc(value)
 
     @field_validator("satellite")
     @classmethod
@@ -100,7 +109,9 @@ class FirmsDetection(BaseModel):
 
 
 class HourlyWeather(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, title="HourlyWeather")
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid", allow_inf_nan=False, title="HourlyWeather"
+    )
 
     valid_at: AwareDatetime
     temperature_c: float | None
@@ -108,13 +119,18 @@ class HourlyWeather(BaseModel):
     wind_speed_kmh: float | None = Field(ge=0)
     wind_direction_degrees: float | None = Field(ge=0, le=360)
 
-    _normalize_time = field_validator("valid_at")(_utc)
+    @field_validator("valid_at")
+    @classmethod
+    def _normalize_time(cls, value: datetime) -> datetime:
+        return _utc(value)
 
 
 class WeatherForecast(BaseModel):
     """Latest hourly forecast for one H3 cell; the compacted topic keeps one per cell."""
 
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, title="WeatherForecast")
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid", allow_inf_nan=False, title="WeatherForecast"
+    )
 
     cell: str = Field(description="Resolution-2 H3 cell; also the Kafka message key")
     latitude: float = Field(ge=-90, le=90, description="Cell center used for the forecast")
@@ -124,7 +140,10 @@ class WeatherForecast(BaseModel):
     generated_at: AwareDatetime
     hourly: list[HourlyWeather] = Field(min_length=1)
 
-    _normalize_time = field_validator("generated_at")(_utc)
+    @field_validator("generated_at")
+    @classmethod
+    def _normalize_time(cls, value: datetime) -> datetime:
+        return _utc(value)
 
     @model_validator(mode="after")
     def consistent(self) -> "WeatherForecast":

@@ -1,14 +1,13 @@
 import logging
-import os
 from datetime import UTC, date, datetime, time
-from typing import Annotated, Literal
+from typing import Annotated, Literal, LiteralString
 from uuid import UUID
 
 import psycopg
 from fastapi import FastAPI, HTTPException, Query
-from psycopg.rows import dict_row
 from pydantic import BaseModel
 
+from wildfire_api.db import connect, fetch_all
 from wildfire_api.weather import router as weather_router
 
 app = FastAPI(title="Wildfire Intelligence Platform API", version="0.2.0")
@@ -68,7 +67,7 @@ def hotspots(
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "date_from must not be later than date_to")
 
-    clauses = []
+    clauses: list[LiteralString] = []
     parameters: list[object] = []
     if west is not None and south is not None and east is not None and north is not None:
         clauses.append("ST_Intersects(location, ST_MakeEnvelope(%s, %s, %s, %s, 4326))")
@@ -86,21 +85,15 @@ def hotspots(
         clauses.append("duplicate_of IS NULL")
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     parameters.append(limit + 1)
-    query = (
-        "SELECT id, event_id, product AS source, instrument, satellite, observed_at, latitude, "
-        "longitude, attributes, duplicate_of "
-        f"FROM fire_detections{where} ORDER BY observed_at DESC, id DESC LIMIT %s"
-    )
-    database_url = os.environ.get(
-        "DATABASE_URL", "postgresql://wildfire:wildfire_dev@localhost:55432/wildfire"
-    )
+    query = f"""
+        SELECT id, event_id, product AS source, instrument, satellite, observed_at, latitude,
+               longitude, attributes, duplicate_of
+        FROM fire_detections{where} ORDER BY observed_at DESC, id DESC LIMIT %s
+    """
     try:
-        with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=5) as connection:
-            rows = connection.execute(query, parameters).fetchall()
+        with connect() as connection:
+            rows = fetch_all(connection, Hotspot, query, parameters)
     except psycopg.Error as exc:
         LOGGER.exception("Unable to query hotspot detections")
         raise HTTPException(503, "Hotspot data is currently unavailable") from exc
-    return HotspotResults(
-        items=[Hotspot.model_validate(row) for row in rows[:limit]],
-        truncated=len(rows) > limit,
-    )
+    return HotspotResults(items=rows[:limit], truncated=len(rows) > limit)

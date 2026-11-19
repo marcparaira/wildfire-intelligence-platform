@@ -10,7 +10,6 @@ the sink worker maintains and can rebuild at any time by replaying the topics.
 | `firms.detections` | H3 cell, resolution 2 | 6 | Unlimited (`retention.ms=-1`) | One `FirmsDetection` per FIRMS pixel and product |
 | `weather.forecasts` | H3 cell, resolution 2 | 6 | Compacted | Latest `WeatherForecast` (7 days, hourly) per cell |
 | `sink-worker.dlq` | Original key | 1 | 30 days | Records the sink worker could not process |
-| `firms.detections.v1` | none | 3 | Broker default | Legacy Phase 2-5 events; read only by `migrate_legacy` |
 
 Topics are defined in `packages/events/src/wildfire_events/topics.py` and
 created by the services at startup; the broker's automatic topic creation is

@@ -5,16 +5,15 @@ the latest forecast per H3 cell in ``weather_cells`` and ``weather_hourly``; the
 only reads them and never calls the provider.
 """
 
-import json
 import logging
-import os
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, LiteralString
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query
-from psycopg.rows import dict_row
 from pydantic import BaseModel
+
+from wildfire_api.db import connect, fetch_all
 
 LOGGER = logging.getLogger(__name__)
 router = APIRouter(tags=["weather"])
@@ -30,6 +29,44 @@ class WeatherPoint(BaseModel):
     precipitation_mm: float | None
     wind_speed_kmh: float | None
     wind_direction_degrees: float | None
+
+
+class _ValidTime(BaseModel):
+    valid_at: datetime
+
+
+class _Polygon(BaseModel):
+    coordinates: list[list[tuple[float, float]]]
+
+
+class _CellRow(BaseModel):
+    cell: str
+    latitude: float
+    longitude: float
+    boundary: str  # GeoJSON polygon
+    generated_at: datetime
+    temperature_c: float | None
+    precipitation_mm: float | None
+    wind_speed_kmh: float | None
+    wind_direction_degrees: float | None
+
+    def point(self) -> WeatherPoint:
+        return WeatherPoint(
+            cell=self.cell,
+            latitude=self.latitude,
+            longitude=self.longitude,
+            boundary=_Polygon.model_validate_json(self.boundary).coordinates[0],
+            generated_at=self.generated_at,
+            temperature_c=self.temperature_c,
+            precipitation_mm=self.precipitation_mm,
+            wind_speed_kmh=self.wind_speed_kmh,
+            wind_direction_degrees=self.wind_direction_degrees,
+        )
+
+
+class _Freshness(BaseModel):
+    newest: datetime
+    oldest: datetime
 
 
 class WeatherForecast(BaseModel):
@@ -62,61 +99,63 @@ def weather_forecast(
     if at is not None and at.tzinfo is None:
         raise HTTPException(422, "Forecast time must include a timezone")
 
-    database_url = os.environ.get(
-        "DATABASE_URL", "postgresql://wildfire:wildfire_dev@localhost:55432/wildfire"
-    )
     try:
-        with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=5) as connection:
+        with connect() as connection:
             times = [
-                row["valid_at"]
-                for row in connection.execute(
-                    "SELECT DISTINCT valid_at FROM weather_hourly ORDER BY valid_at"
-                ).fetchall()
+                row.valid_at
+                for row in fetch_all(
+                    connection,
+                    _ValidTime,
+                    "SELECT DISTINCT valid_at FROM weather_hourly ORDER BY valid_at",
+                )
             ]
             if not times:
                 raise HTTPException(503, "No weather forecast has been ingested yet")
 
             now = datetime.now(UTC)
-            selected_at = at.astimezone(UTC) if at is not None else next(
-                (value for value in times if value >= now), times[-1]
+            selected_at = (
+                at.astimezone(UTC)
+                if at is not None
+                else next((value for value in times if value >= now), times[-1])
             )
             if selected_at not in times:
                 raise HTTPException(422, "Forecast time is not available")
 
-            clauses = ["h.valid_at = %s"]
+            clauses: list[LiteralString] = ["h.valid_at = %s"]
             parameters: list[object] = [selected_at]
             if west is not None and south is not None and east is not None and north is not None:
                 clauses.append("c.boundary && ST_MakeEnvelope(%s, %s, %s, %s, 4326)")
                 parameters.extend((west, south, east, north))
-            rows = connection.execute(
-                """
+            rows = fetch_all(
+                connection,
+                _CellRow,
+                f"""
                 SELECT c.cell, c.latitude, c.longitude, ST_AsGeoJSON(c.boundary) AS boundary,
                        c.generated_at, h.temperature_c, h.precipitation_mm, h.wind_speed_kmh,
                        h.wind_direction_degrees
                 FROM weather_hourly AS h JOIN weather_cells AS c USING (cell)
-                WHERE """
-                + " AND ".join(clauses)
-                + " ORDER BY c.latitude, c.longitude",
+                WHERE {" AND ".join(clauses)}
+                ORDER BY c.latitude, c.longitude
+                """,
                 parameters,
-            ).fetchall()
-            freshness = connection.execute(
+            )
+            # weather_hourly references weather_cells, so a forecast time implies cells.
+            [freshness] = fetch_all(
+                connection,
+                _Freshness,
                 "SELECT max(generated_at) AS newest, min(generated_at) AS oldest "
-                "FROM weather_cells"
-            ).fetchone()
+                + "FROM weather_cells",
+            )
     except HTTPException:
         raise
     except psycopg.Error as exc:
         LOGGER.exception("Unable to query stored weather forecasts")
         raise HTTPException(503, "Weather data is currently unavailable") from exc
 
-    items = []
-    for row in rows:
-        row["boundary"] = [tuple(point) for point in json.loads(row["boundary"])["coordinates"][0]]
-        items.append(WeatherPoint.model_validate(row))
     return WeatherForecast(
-        generated_at=freshness["newest"],
-        oldest_generated_at=freshness["oldest"],
+        generated_at=freshness.newest,
+        oldest_generated_at=freshness.oldest,
         valid_at=selected_at,
         times=times,
-        items=items,
+        items=[row.point() for row in rows],
     )
