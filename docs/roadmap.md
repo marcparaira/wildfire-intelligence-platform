@@ -39,9 +39,9 @@
 
 ## Phase 5 — Weather Integration
 
-- Integrate a weather forecast provider and store forecasts.
-- Add temperature, precipitation, and wind overlays.
-- Provide a forecast timeline.
+- [x] Integrate Open-Meteo forecasts and store hourly weather in PostGIS.
+- [x] Add temperature, precipitation, and wind-speed/direction map overlays.
+- [x] Provide a seven-day hourly forecast timeline.
 
 **Deliverable:** Combined fire and weather monitoring dashboard.
 

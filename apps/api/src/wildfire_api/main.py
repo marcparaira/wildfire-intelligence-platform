@@ -8,8 +8,11 @@ from fastapi import FastAPI, HTTPException, Query
 from psycopg.rows import dict_row
 from pydantic import BaseModel
 
+from wildfire_api.weather import router as weather_router
+
 app = FastAPI(title="Wildfire Intelligence Platform API", version="0.1.0")
 LOGGER = logging.getLogger(__name__)
+app.include_router(weather_router)
 
 
 class Hotspot(BaseModel):

@@ -24,12 +24,14 @@ and date filters and recent observation details.
 ## Architecture
 
 The diagram shows the services currently implemented in this repository. FIRMS
-ingestion is run on demand; the processor continuously consumes Kafka events.
+ingestion is run on demand; weather is fetched and stored when requested and
+refreshed after six hours; the processor continuously consumes Kafka events.
 
 ```mermaid
 flowchart TB
     subgraph External["External Services"]
         FIRMS["NASA FIRMS API"]
+        WEATHER["Open-Meteo forecast API"]
         OSM["OpenStreetMap tile service"]
     end
 
@@ -56,17 +58,19 @@ flowchart TB
     end
 
     FIRMS --> INGEST
+    WEATHER -->|7-day hourly forecast| API
     INGEST -->|Country boundary filter| DB
     INGEST --> KAFKA
     PROC --> DB
     API -->|Hotspot queries| DB
+    API <-->|Weather forecast storage| DB
     UI -->|Map tile requests| OSM
 
     classDef external fill:#e0f2fe,stroke:#0284c7,color:#075985
     classDef streaming fill:#fef3c7,stroke:#d97706,color:#92400e
     classDef data fill:#dcfce7,stroke:#16a34a,color:#166534
 
-    class FIRMS,OSM external
+    class FIRMS,WEATHER,OSM external
     class KAFKA,PROC streaming
     class DB data
 ```
@@ -119,6 +123,19 @@ the detail panel retains the measured value. Gray symbols indicate unavailable
 or invalid FRP. FRP is pixel-integrated radiated power, not a direct measure
 of fire severity or danger; satellite retrievals have limitations. See
 [NASA's VIIRS product documentation](https://www.earthdata.nasa.gov/data/instruments/viirs/viirs-i-band-375-m-active-fire-data).
+
+## Weather forecasts
+
+Choose **Temperature**, **Precipitation**, or **Wind speed** from the map's
+weather-layer menu to load Open-Meteo's seven-day hourly forecast. The app
+submits `POST /weather/forecast`; the API stores forecasts in the
+`weather_forecasts` table on a 3-degree regional grid. Stored data is reused
+for six hours; **Refresh forecast** requests a fresh forecast immediately. The
+selected forecast hour is controlled by the timeline, and wind arrows point
+downwind. The overlay is a coarse visualization, not a local weather station
+reading or a fire-behavior prediction. Temperatures are in °C, hourly
+precipitation in mm, and wind speed in km/h. See
+[Open-Meteo](https://open-meteo.com/) for provider details and attribution.
 
 The [hotspot API](http://localhost:8000/docs#/hotspots) accepts optional
 `west`, `south`, `east`, and `north` bounding-box coordinates (all four
@@ -259,5 +276,6 @@ retention policy, but `down -v` deletes both.
 | API health | <http://localhost:8000/health> |
 | API health through the web proxy | <http://localhost:8080/api/health> |
 | Hotspot API through the web proxy | <http://localhost:8080/api/hotspots> |
+| Weather forecast API through the web proxy | <http://localhost:8080/api/weather/forecast> |
 | PostgreSQL/PostGIS | `localhost:55432` |
 | Kafka | `localhost:19092` |
