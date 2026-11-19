@@ -32,17 +32,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 .brand { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
 .brand h1 { margin: 0; font-size: 14px; font-weight: 650; }
 .brand span, .header-source { color: #c1ccc7; font-size: 12px; }
-.topbar-actions { display: flex; gap: 4px; }
-.toolbar-button {
-  min-height: 30px;
-  padding: 0 10px;
-  color: #e1e9e5;
-  border: 1px solid #60716a;
-  border-radius: 2px;
-  background: transparent;
-}
-.toolbar-button:hover, .toolbar-button[aria-expanded="true"] { background: #455951; border-color: #83958c; }
-.topbar .toolbar-button:focus-visible { outline-color: #fff; }
 .header-source { margin-left: auto; white-space: nowrap; }
 
 .workspace { display: flex; flex: 1 1 auto; min-height: 0; min-width: 0; }
@@ -61,6 +50,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 }
 .panel-heading h2 { margin: 0; font-size: 13px; font-weight: 650; }
 .panel-heading span { color: #52605a; font-variant-numeric: tabular-nums; }
+.sidebar[data-collapsed="true"], .detail-column[data-collapsed="true"] { flex-basis: 42px; }
+.panel-heading-toggle { padding: 5px 6px; }
+.sidebar .panel-heading-toggle h2 { padding-left: 6px; }
+.observation-heading { justify-content: flex-start; }
+.panel-toggle {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #b9c5be;
+  border-radius: 2px;
+  background: #fff;
+}
+.panel-toggle:hover { background: #e0e8e2; }
+.panel-toggle svg { width: 16px; height: 16px; fill: none; stroke: #52605a; stroke-width: 1.5; }
 .filters { padding: 12px; }
 .filters label, .date-label { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 600; }
 .filters select, .filters input {
@@ -133,8 +139,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
   color: #536159;
   font-size: 11px;
 }
-.legend { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.legend i, .recent-item i { width: 9px; height: 9px; flex: 0 0 auto; border: 1px solid #a44725; border-radius: 50%; background: #e76c38; }
+.legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 100%; white-space: nowrap; }
+.legend-scale { width: 154px; }
+.legend-ramp { display: flex; align-items: center; gap: 3px; height: 26px; }
+.legend-ramp span { flex: 1; height: 6px; border: 1px solid #9a8b78; }
+.legend-ramp i, .legend-unavailable i, .recent-item i { flex: 0 0 auto; border: 1px solid #fff; border-radius: 50%; }
+.legend-ramp i { border-color: #514226; }
+.legend-ramp .legend-small, .legend-unavailable i { width: 8px; height: 8px; }
+.legend-ramp .legend-large { width: 26px; height: 26px; }
+.legend-ticks { position: relative; display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+.legend-ticks span:nth-child(2) { position: absolute; transform: translateX(-50%); }
+.legend-unavailable { display: inline-flex; align-items: center; gap: 4px; }
+.legend-unavailable i { box-shadow: 0 0 0 1px #66747b; }
+.recent-item i { width: 9px; height: 9px; background: #e76c38; }
 
 .details { border-bottom: 1px solid #c8d0cd; }
 .detail-empty, .recent-empty, .recent-foot { margin: 0; padding: 12px; color: #596761; font-size: 12px; line-height: 1.45; }
@@ -179,8 +196,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
   .brand span { display: none; }
   .workspace { display: flex; flex-direction: column; }
   .sidebar, .detail-column { flex: none; overflow: visible; border: 0; }
+  .sidebar[data-collapsed="true"], .detail-column[data-collapsed="true"] { flex-basis: auto; }
   .sidebar { border-bottom: 1px solid #c8d0cd; }
   .detail-column { border-top: 1px solid #c8d0cd; }
+  .sidebar .panel-toggle svg { transform: rotate(90deg); }
+  .detail-column .panel-toggle svg { transform: rotate(-90deg); }
   .date-fields { grid-template-columns: 1fr 1fr; }
   .content { flex: none; }
   .map-wrap { height: 60vh; min-height: 340px; flex: none; }

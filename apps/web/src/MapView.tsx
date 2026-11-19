@@ -3,71 +3,58 @@ import Feature from "ol/Feature";
 import Map from "ol/Map";
 import View from "ol/View";
 import Point from "ol/geom/Point";
+import { fromExtent } from "ol/geom/Polygon";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import { fromLonLat, transformExtent } from "ol/proj";
 import OSM from "ol/source/OSM";
 import VectorSource from "ol/source/Vector";
-import { Circle, Fill, Stroke, Style } from "ol/style";
+import { Stroke, Style } from "ol/style";
 import "ol/ol.css";
+import { frpStyles } from "./frp";
 import type { Bounds, Hotspot } from "./hotspots";
 
 interface MapViewProps {
   hotspots: Hotspot[];
   bounds: Bounds;
+  areaBounds: Bounds | null;
   selectedId: number | null;
   onSelect: (id: number) => void;
 }
 
-const markerStyle = new Style({
-  image: new Circle({
-    radius: 5,
-    fill: new Fill({ color: "#e76c38" }),
-    stroke: new Stroke({ color: "#fff8ef", width: 1.5 }),
-  }),
-});
-
-const selectedStyle = new Style({
-  image: new Circle({
-    radius: 8,
-    fill: new Fill({ color: "#ad3d1c" }),
-    stroke: new Stroke({ color: "#fff8ef", width: 3 }),
-  }),
-});
-
-export default function MapView({ hotspots, bounds, selectedId, onSelect }: MapViewProps) {
+export default function MapView({ hotspots, bounds, areaBounds, selectedId, onSelect }: MapViewProps) {
   const target = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const sourceRef = useRef(new VectorSource());
+  const areaSourceRef = useRef(new VectorSource());
   const selectRef = useRef(onSelect);
   selectRef.current = onSelect;
 
   useEffect(() => {
     if (!target.current) return;
+    const hotspotLayer = new VectorLayer({ source: sourceRef.current });
     const map = new Map({
       target: target.current,
       layers: [
         new TileLayer({ source: new OSM() }),
-        new VectorLayer({ source: sourceRef.current, style: markerStyle }),
+        new VectorLayer({
+          source: areaSourceRef.current,
+          style: [
+            new Style({ stroke: new Stroke({ color: "#fff", width: 4, lineDash: [8, 5] }) }),
+            new Style({ stroke: new Stroke({ color: "#315f7b", width: 2, lineDash: [8, 5] }) }),
+          ],
+        }),
+        hotspotLayer,
       ],
       view: new View({ center: fromLonLat([114, 1.5]), zoom: 5 }),
     });
     map.on("singleclick", (event) => {
       const feature = map.forEachFeatureAtPixel(event.pixel, (item) => item, {
         hitTolerance: 6,
+        layerFilter: (layer) => layer === hotspotLayer,
       });
       const id = feature?.getId();
       if (typeof id === "number") selectRef.current(id);
-    });
-    map.on("pointermove", (event) => {
-      const element = map.getTargetElement();
-      if (!event.dragging && element) {
-        element.style.cursor = map.hasFeatureAtPixel(event.pixel, {
-          hitTolerance: 6,
-        })
-          ? "pointer"
-          : "";
-      }
     });
     mapRef.current = map;
     return () => {
@@ -85,11 +72,19 @@ export default function MapView({ hotspots, bounds, selectedId, onSelect }: MapV
           geometry: new Point(fromLonLat([hotspot.longitude, hotspot.latitude])),
         });
         feature.setId(hotspot.id);
-        feature.setStyle(hotspot.id === selectedId ? selectedStyle : markerStyle);
+        feature.setStyle(frpStyles(hotspot.attributes.frp, hotspot.id === selectedId));
         return feature;
       }),
     );
   }, [hotspots, selectedId]);
+
+  useEffect(() => {
+    const source = areaSourceRef.current;
+    source.clear();
+    if (areaBounds) {
+      source.addFeature(new Feature(fromExtent(transformExtent(areaBounds, "EPSG:4326", "EPSG:3857"))));
+    }
+  }, [areaBounds]);
 
   useEffect(() => {
     mapRef.current?.getView().fit(transformExtent(bounds, "EPSG:4326", "EPSG:3857"), {

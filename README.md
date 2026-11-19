@@ -43,14 +43,25 @@ Do not use these defaults outside a local development environment.
 
 ## Hotspot dashboard
 
-The dashboard displays detections already ingested into PostGIS. Select an area
-and an inclusive UTC date range, then select **Apply filters**. Choose a map
+The dashboard displays detections already ingested into PostGIS. By default
+there is no geographic filter; the map initially frames Southeast Asia. Choose
+an optional regional area and an inclusive UTC date range, then select **Apply
+filters**. A dashed map outline shows the applied area filter. Areas use
+approximate, overlapping bounding boxes and can include nearby land and sea;
+they are not country boundaries. Choose a map
 point or a recent observation to see its acquisition time, source, confidence,
-and other attributes. Use **Filters** and **Observations** in the header to
-collapse or reopen the side panels; selecting a map point reopens observation
-details. **Refresh data** re-queries the database; it does not run FIRMS
+and other attributes. Use the arrows on the side panels to collapse or reopen
+them; selecting a map point reopens observation details. **Refresh data**
+re-queries the database; it does not run FIRMS
 ingestion. The map uses OpenStreetMap tiles and needs internet access for its
 basemap.
+
+Marker color and size use a fixed logarithmic fire radiative power (FRP) scale
+from 0 to 100 MW; values at or above 100 MW share the largest symbol, while
+the detail panel retains the measured value. Gray symbols indicate unavailable
+or invalid FRP. FRP is pixel-integrated radiated power, not a direct measure
+of fire severity or danger; satellite retrievals have limitations. See
+[NASA's VIIRS product documentation](https://www.earthdata.nasa.gov/data/instruments/viirs/viirs-i-band-375-m-active-fire-data).
 
 The [hotspot API](http://localhost:8000/docs#/hotspots) accepts optional
 `west`, `south`, `east`, and `north` bounding-box coordinates (all four

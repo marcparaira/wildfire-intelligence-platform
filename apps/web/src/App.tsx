@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import MapView from "./MapView";
-import { formatUtc, regions } from "./hotspots";
-import type { Hotspot, HotspotResults } from "./hotspots";
+import { FRP_HIGH_COLOR, FRP_LOW_COLOR, FRP_UNAVAILABLE_COLOR, frpPosition, parseFrp } from "./frp";
+import { DEFAULT_VIEW_BOUNDS, formatUtc, isRegionId, regions } from "./hotspots";
+import type { Hotspot, HotspotResults, RegionId } from "./hotspots";
 
 interface Filters {
-  region: string;
+  region: RegionId | "";
   dateFrom: string;
   dateTo: string;
 }
@@ -14,7 +15,7 @@ function initialFilters(): Filters {
   const now = new Date();
   const from = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
   return {
-    region: "southeastAsia",
+    region: "",
     dateFrom: from.toISOString().slice(0, 10),
     dateTo: now.toISOString().slice(0, 10),
   };
@@ -34,15 +35,17 @@ function App() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const [west, south, east, north] = regions[filters.region].bounds;
     const params = new URLSearchParams({
-      west: String(west),
-      south: String(south),
-      east: String(east),
-      north: String(north),
       date_from: filters.dateFrom,
       date_to: filters.dateTo,
     });
+    if (filters.region) {
+      const [west, south, east, north] = regions[filters.region].bounds;
+      params.set("west", String(west));
+      params.set("south", String(south));
+      params.set("east", String(east));
+      params.set("north", String(north));
+    }
     setLoading(true);
     setError("");
     setResults(null);
@@ -66,6 +69,7 @@ function App() {
 
   const hotspots = results?.items ?? [];
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId);
+  const areaBounds = filters.region ? regions[filters.region].bounds : null;
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -80,27 +84,32 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand"><h1>Wildfire intelligence</h1><span>Hotspot monitoring</span></div>
-        <div className="topbar-actions">
-          <button type="button" className="toolbar-button" aria-expanded={filtersOpen} aria-controls="filter-panel" onClick={() => setFiltersOpen((open) => !open)}>
-            Filters
-          </button>
-          <button type="button" className="toolbar-button" aria-expanded={observationsOpen} aria-controls="observation-panel" onClick={() => setObservationsOpen((open) => !open)}>
-            Observations
-          </button>
-        </div>
+        <div className="brand"><h1>Wildfire Intelligence Platform</h1></div>
         <span className="header-source">NASA FIRMS · VIIRS NOAA-20 NRT</span>
       </header>
 
       <main className="workspace">
-        <aside id="filter-panel" className="sidebar" aria-label="Filters" hidden={!filtersOpen}>
-          <div className="panel-heading"><h2>Filters</h2></div>
-          <form onSubmit={applyFilters} className="filters">
+        <aside className="sidebar" aria-label="Filters" data-collapsed={!filtersOpen}>
+          <div className="panel-heading panel-heading-toggle">
+            <h2 hidden={!filtersOpen}>Filters</h2>
+            <button type="button" className="panel-toggle" aria-label={filtersOpen ? "Collapse filters" : "Expand filters"} title={filtersOpen ? "Collapse filters" : "Expand filters"} aria-expanded={filtersOpen} aria-controls="filter-panel" onClick={() => setFiltersOpen((open) => !open)}>
+              <svg aria-hidden="true" viewBox="0 0 16 16"><polyline points={filtersOpen ? "10.5 3 5.5 8 10.5 13" : "5.5 3 10.5 8 5.5 13"} /></svg>
+            </button>
+          </div>
+          <form id="filter-panel" onSubmit={applyFilters} className="filters" hidden={!filtersOpen}>
             <label htmlFor="region">Geographic area</label>
-            <select id="region" value={draft.region} onChange={(event) => setDraft({ ...draft, region: event.target.value })}>
+            <select id="region" value={draft.region} onChange={(event) => {
+              const value = event.target.value;
+              if (value === "" || isRegionId(value)) {
+                setDraft({ ...draft, region: value });
+              } else {
+                setFormError("Choose a valid geographic area.");
+              }
+            }}>
+              <option value="">No area filter</option>
               {Object.entries(regions).map(([key, region]) => <option key={key} value={key}>{region.label}</option>)}
             </select>
-            <p className="field-note">Bounding box, not an administrative boundary.</p>
+            <p className="field-note">Areas use approximate, overlapping bounding boxes, not administrative boundaries.</p>
             <div className="date-label">Observation dates <span>UTC</span></div>
             <div className="date-fields">
               <div><label htmlFor="date-from">From</label><input id="date-from" type="date" value={draft.dateFrom} onChange={(event) => setDraft({ ...draft, dateFrom: event.target.value })} /></div>
@@ -113,7 +122,7 @@ function App() {
 
         <section className="content" aria-label="Hotspot dashboard">
           <div className="map-toolbar">
-            <div className="map-title"><h2>Hotspots</h2><span>{regions[filters.region].label}</span></div>
+            <div className="map-title"><h2>Hotspots</h2><span>{filters.region ? regions[filters.region].label : "All areas"}</span></div>
             <button className="refresh-button" type="button" onClick={() => setRefresh((value) => value + 1)}>Refresh data</button>
           </div>
           <div className="map-summary">
@@ -126,24 +135,43 @@ function App() {
           {!loading && !error && hotspots.length === 0 && <div className="map-message" role="status">No detections for these filters. Try a wider area or date range.</div>}
           {results?.truncated && <div className="notice" role="status">Showing the most recent 5,000 detections. Narrow your filters to see the rest.</div>}
           <div className="map-wrap">
-            <MapView hotspots={hotspots} bounds={regions[filters.region].bounds} selectedId={selectedId} onSelect={(id) => { setSelectedId(id); setObservationsOpen(true); }} />
+            <MapView hotspots={hotspots} bounds={areaBounds ?? DEFAULT_VIEW_BOUNDS} areaBounds={areaBounds} selectedId={selectedId} onSelect={(id) => { setSelectedId(id); setObservationsOpen(true); }} />
           </div>
           <div className="map-footer">
-            <span className="legend" aria-label="Map legend"><i aria-hidden="true" /> Satellite detection · NASA FIRMS VIIRS NOAA-20 NRT</span>
-            <span>Observations are not confirmed fire perimeters.</span>
+            <div className="legend" role="group" aria-label="FRP legend, logarithmic scale, capped visually at 100 megawatts">
+              <span>FRP (MW, log; ≥100 capped)</span>
+              <div className="legend-scale">
+                <div className="legend-ramp" aria-hidden="true">
+                  <i className="legend-small" style={{ backgroundColor: FRP_LOW_COLOR }} />
+                  <span style={{ background: `linear-gradient(to right, ${FRP_LOW_COLOR}, ${FRP_HIGH_COLOR})` }} />
+                  <i className="legend-large" style={{ backgroundColor: FRP_HIGH_COLOR }} />
+                </div>
+                <div className="legend-ticks"><span>0</span><span style={{ left: `${frpPosition(10) * 100}%` }}>10</span><span>≥100</span></div>
+              </div>
+              <span className="legend-unavailable"><i style={{ backgroundColor: FRP_UNAVAILABLE_COLOR }} aria-hidden="true" /> Unavailable</span>
+            </div>
+            {areaBounds && <span>Dashed outline: area filter</span>}
+            <span>FRP is radiated power, not fire severity or danger. Detections are not fire perimeters.</span>
           </div>
         </section>
 
-        <aside id="observation-panel" className="detail-column" aria-label="Observations" hidden={!observationsOpen}>
-          <section className="details">
-            <div className="panel-heading"><h2>Detection details</h2></div>
-            {selected ? <DetectionDetails hotspot={selected} /> : <p className="detail-empty">Select a point on the map or an observation below.</p>}
-          </section>
-          <section className="recent">
-            <div className="panel-heading"><h2>Recent detections</h2><span>{hotspots.length.toLocaleString()}</span></div>
-            {hotspots.length > 0 ? <div className="recent-list">{hotspots.slice(0, 8).map((hotspot) => <button key={hotspot.id} type="button" className="recent-item" aria-pressed={hotspot.id === selectedId} onClick={() => setSelectedId(hotspot.id)}><i aria-hidden="true" /><span><strong>{hotspot.latitude.toFixed(3)}°, {hotspot.longitude.toFixed(3)}°</strong><small>{formatUtc(hotspot.observed_at)}</small></span></button>)}</div> : <p className="recent-empty">{loading ? "Loading observations…" : error ? "Observations unavailable." : "No observations to show."}</p>}
-            {hotspots.length > 8 && <p className="recent-foot">Showing 8 most recent observations</p>}
-          </section>
+        <aside className="detail-column" aria-label="Observations" data-collapsed={!observationsOpen}>
+          <div className="panel-heading panel-heading-toggle observation-heading">
+            <button type="button" className="panel-toggle" aria-label={observationsOpen ? "Collapse observations" : "Expand observations"} title={observationsOpen ? "Collapse observations" : "Expand observations"} aria-expanded={observationsOpen} aria-controls="observation-panel" onClick={() => setObservationsOpen((open) => !open)}>
+              <svg aria-hidden="true" viewBox="0 0 16 16"><polyline points={observationsOpen ? "5.5 3 10.5 8 5.5 13" : "10.5 3 5.5 8 10.5 13"} /></svg>
+            </button>
+            <h2 hidden={!observationsOpen}>Detection details</h2>
+          </div>
+          <div id="observation-panel" hidden={!observationsOpen}>
+            <section className="details">
+              {selected ? <DetectionDetails hotspot={selected} /> : <p className="detail-empty">Select a point on the map or an observation below.</p>}
+            </section>
+            <section className="recent">
+              <div className="panel-heading"><h2>Recent detections</h2><span>{hotspots.length.toLocaleString()}</span></div>
+              {hotspots.length > 0 ? <div className="recent-list">{hotspots.slice(0, 8).map((hotspot) => <button key={hotspot.id} type="button" className="recent-item" aria-pressed={hotspot.id === selectedId} onClick={() => setSelectedId(hotspot.id)}><i aria-hidden="true" /><span><strong>{hotspot.latitude.toFixed(3)}°, {hotspot.longitude.toFixed(3)}°</strong><small>{formatUtc(hotspot.observed_at)}</small></span></button>)}</div> : <p className="recent-empty">{loading ? "Loading observations…" : error ? "Observations unavailable." : "No observations to show."}</p>}
+              {hotspots.length > 8 && <p className="recent-foot">Showing 8 most recent observations</p>}
+            </section>
+          </div>
         </aside>
       </main>
     </div>
@@ -151,13 +179,14 @@ function App() {
 }
 
 function DetectionDetails({ hotspot }: { hotspot: Hotspot }) {
+  const frp = parseFrp(hotspot.attributes.frp);
   const fields = [
     ["Observed", formatUtc(hotspot.observed_at)],
     ["Coordinates", `${hotspot.latitude.toFixed(5)}°, ${hotspot.longitude.toFixed(5)}°`],
     ["Satellite", hotspot.satellite],
     ["Product", hotspot.source],
     ["Confidence", hotspot.attributes.confidence || "Not provided"],
-    ["Fire radiative power", hotspot.attributes.frp ? `${hotspot.attributes.frp} MW` : "Not provided"],
+    ["Fire radiative power", frp !== null ? `${frp} MW` : "Not provided"],
     ["Day / night", hotspot.attributes.daynight === "D" ? "Day" : hotspot.attributes.daynight === "N" ? "Night" : "Not provided"],
   ];
   return <div className="detail-content"><div className="detail-type">Satellite detection <span>#{hotspot.id}</span></div><dl>{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>Pixel center detected by NASA FIRMS, not a confirmed fire perimeter.</p></div>;
