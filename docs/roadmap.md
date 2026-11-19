@@ -30,7 +30,14 @@
 
 **Deliverable:** Working wildfire hotspot dashboard.
 
-## Phase 4 — Weather Integration
+## Phase 4 — FIRMS for Southeast Asia
+
+- [x] Expand FIRMS ingestion to the selected Southeast Asian countries and Papua New Guinea.
+- [x] Store and display the regional detections.
+
+**Deliverable:** Country-filtered regional satellite-data coverage.
+
+## Phase 5 — Weather Integration
 
 - Integrate a weather forecast provider and store forecasts.
 - Add temperature, precipitation, and wind overlays.
@@ -38,7 +45,7 @@
 
 **Deliverable:** Combined fire and weather monitoring dashboard.
 
-## Phase 5 — Imagery and Operational Features
+## Phase 6 — Imagery and Operational Features
 
 - Integrate satellite imagery with layer and opacity controls.
 - Add historical hotspot views.
@@ -46,7 +53,7 @@
 
 **Deliverable:** First functional MVP.
 
-## Phase 6 — AWS Deployment
+## Phase 7 — AWS Deployment
 
 - Provision infrastructure using AWS CDK.
 - Build and publish production container images.

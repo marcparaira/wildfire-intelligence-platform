@@ -18,8 +18,8 @@ export type Bounds = [number, number, number, number];
 export const regions: Record<string, { label: string; bounds: Bounds }> = {
   borneo: { label: "Borneo pilot", bounds: [108, -5, 120, 8] },
   sumatra: { label: "Sumatra", bounds: [94, -7, 106, 6] },
-  mainland: { label: "Mainland Southeast Asia", bounds: [92, 8, 108, 24] },
-  southeastAsia: { label: "Southeast Asia", bounds: [92, -12, 142, 24] },
+  mainland: { label: "Mainland Southeast Asia", bounds: [92, 8, 110, 29] },
+  southeastAsia: { label: "Southeast Asia", bounds: [92, -12, 156, 29] },
 };
 
 export function formatUtc(timestamp: string): string {

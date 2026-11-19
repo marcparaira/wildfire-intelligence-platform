@@ -14,7 +14,7 @@ function initialFilters(): Filters {
   const now = new Date();
   const from = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
   return {
-    region: "borneo",
+    region: "southeastAsia",
     dateFrom: from.toISOString().slice(0, 10),
     dateTo: now.toISOString().slice(0, 10),
   };

@@ -39,7 +39,9 @@ describe("hotspot dashboard", () => {
     render(<App />);
 
     expect(await screen.findByText("0.523°, 114.123°")).toBeInTheDocument();
-    expect(fetchMock.mock.calls[0][0]).toContain("west=108");
+    expect(fetchMock.mock.calls[0][0]).toContain("west=92");
+    expect(fetchMock.mock.calls[0][0]).toContain("east=156");
+    expect(fetchMock.mock.calls[0][0]).toContain("north=29");
     fireEvent.click(screen.getByRole("button", { name: "Map point 7" }));
     expect(screen.getByText("12.5 MW")).toBeInTheDocument();
     expect(screen.getByText("2026-03-05 00:07 UTC", { selector: "dd" })).toBeInTheDocument();

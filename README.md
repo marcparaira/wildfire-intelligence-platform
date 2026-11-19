@@ -126,10 +126,20 @@ The Vite development server proxies `/api` requests to the API on port 8000.
 
 ## FIRMS ingestion
 
-The Phase 2 pilot uses the FIRMS `VIIRS_NOAA20_NRT` product over the Borneo
-bounding box `108,-5,120,8` (west, south, east, north). This rectangle also
-includes surrounding land and sea; it is not an administrative boundary.
-Detections are satellite pixel centers, not confirmed fire perimeters.
+The pipeline uses the FIRMS `VIIRS_NOAA20_NRT` product for Myanmar, Thailand,
+Laos, Cambodia, Vietnam, Brunei, Malaysia, Singapore, the Philippines,
+Indonesia, Papua New Guinea, and Timor-Leste. It requests the regional
+bounding box `92,-12,156,29` (west, south, east, north), then keeps detections
+whose pixel centers fall within those countries. The same filter applies to
+CSV input. The public-domain [Natural Earth 1:10m country boundaries, version
+5.1.1](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/)
+are approximate and use de facto boundaries; small islands and coastal
+detections may be omitted. Detections are satellite pixel centers, not
+confirmed fire perimeters.
+
+Existing records are not deleted or retroactively filtered, so earlier
+offshore observations may still appear. The dashboard's area filters remain
+bounding boxes, not country boundaries.
 
 1. Request a free [NASA FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/area/).
 2. Save the key in `.firms-map-key` in the project root, with restrictive

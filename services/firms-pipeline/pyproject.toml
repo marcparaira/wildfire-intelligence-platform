@@ -22,6 +22,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+wildfire_firms = ["data/*.geojson"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

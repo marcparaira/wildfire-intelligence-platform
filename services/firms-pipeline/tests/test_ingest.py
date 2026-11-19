@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from wildfire_firms.events import Detection
-from wildfire_firms.ingest import fetch_csv, parse_csv
+from wildfire_firms.ingest import fetch_csv, main, parse_csv
 
 FIXTURE = Path(__file__).parent / "fixtures" / "borneo.csv"
 
@@ -50,11 +50,11 @@ def test_requires_key_and_valid_day_range() -> None:
         fetch_csv("key", 6)
 
 
-def test_firms_request_uses_borneo_and_redacts_key_on_http_error(
+def test_firms_request_uses_region_and_redacts_key_on_http_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fail(url: str, *, timeout: int) -> None:
-        assert url.endswith("/test-key/VIIRS_NOAA20_NRT/108,-5,120,8/2")
+        assert url.endswith("/test-key/VIIRS_NOAA20_NRT/92,-12,156,29/2")
         assert timeout == 60
         raise HTTPError(url, 403, "Forbidden", {}, BytesIO())
 
@@ -71,3 +71,28 @@ def test_firms_success_response_is_decoded_and_parsed(monkeypatch: pytest.Monkey
         lambda url, timeout: BytesIO(b"\xef\xbb\xbf" + content),
     )
     assert len(list(parse_csv(fetch_csv("test-key", 1)))) == 2
+
+
+@pytest.mark.parametrize("arguments", [["--csv", str(FIXTURE)], ["--key-stdin"]])
+def test_ingestion_filters_before_publishing(
+    monkeypatch: pytest.MonkeyPatch, arguments: list[str]
+) -> None:
+    published: list[Detection] = []
+    monkeypatch.setattr("sys.argv", ["ingest", *arguments])
+    monkeypatch.setattr("sys.stdin", StringIO("test-key\n"))
+
+    def fake_fetch(_key: str, _days: int) -> str:
+        return FIXTURE.read_text()
+
+    def fake_filter(records: list[Detection], _url: str) -> list[Detection]:
+        return records[1:]
+
+    def capture(records: list[Detection], _bootstrap: str) -> int:
+        published.extend(records)
+        return len(records)
+
+    monkeypatch.setattr("wildfire_firms.ingest.fetch_csv", fake_fetch)
+    monkeypatch.setattr("wildfire_firms.ingest.filter_countries", fake_filter)
+    monkeypatch.setattr("wildfire_firms.ingest.publish", capture)
+    main()
+    assert published == list(parse_csv(FIXTURE.read_text()))[1:]

@@ -2,6 +2,7 @@ import os
 import time
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import psycopg
@@ -10,10 +11,42 @@ from kafka import KafkaConsumer
 from kafka.admin import KafkaAdminClient, NewTopic
 from psycopg import sql
 
-from wildfire_firms.ingest import publish
+from wildfire_firms.ingest import filter_countries, parse_csv, publish
 from wildfire_firms.processor import initialize, process_record
 
 FIXTURE = Path(__file__).parent / "fixtures" / "borneo.csv"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("PIPELINE_TEST_DATABASE_URL"),
+    reason="set PIPELINE_TEST_DATABASE_URL to run PostGIS integration test",
+)
+def test_country_filter_covers_requested_countries_and_excludes_sea_and_neighbors() -> None:
+    cities = [
+        (16.866, 96.195),   # Myanmar
+        (13.756, 100.502),  # Thailand
+        (17.975, 102.633),  # Laos
+        (11.557, 104.928),  # Cambodia
+        (21.028, 105.854),  # Vietnam
+        (4.903, 114.939),   # Brunei
+        (3.139, 101.687),   # Malaysia
+        (1.352, 103.82),    # Singapore
+        (14.599, 120.984),  # Philippines
+        (-6.208, 106.845),  # Indonesia
+        (-9.443, 147.18),   # Papua New Guinea
+        (-8.56, 125.573),   # Timor-Leste
+        (27.33, 97.42),     # Northern Myanmar
+        (-6.22, 155.56),    # Bougainville, Papua New Guinea
+    ]
+    excluded = [(2, 105), (25, 100), (-13, 135)]
+    template = next(parse_csv(FIXTURE.read_text()))
+    detections = [
+        template.model_copy(update={"latitude": Decimal(str(lat)), "longitude": Decimal(str(lon))})
+        for lat, lon in cities + excluded
+    ]
+    assert filter_countries(detections, os.environ["PIPELINE_TEST_DATABASE_URL"]) == detections[
+        : len(cities)
+    ]
 
 
 @pytest.mark.skipif(
@@ -44,8 +77,9 @@ def test_firms_kafka_postgis_pipeline_and_replay() -> None:
                     auto_offset_reset="earliest",
                 )
                 try:
-                    assert publish(FIXTURE.read_text(), bootstrap, topic) == 2
-                    assert publish(FIXTURE.read_text(), bootstrap, topic) == 2
+                    records = list(parse_csv(FIXTURE.read_text()))
+                    assert publish(records, bootstrap, topic) == 2
+                    assert publish(records, bootstrap, topic) == 2
                     results = []
                     deadline = time.monotonic() + 60
                     while len(results) < 4 and time.monotonic() < deadline:
