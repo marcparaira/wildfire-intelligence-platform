@@ -17,35 +17,68 @@ only the rejected ones are dead-lettered.
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import Event
-from typing import Any, Protocol
+from typing import Protocol, cast
 
 import psycopg
 from kafka import KafkaConsumer, KafkaProducer
 from kafka.consumer.fetcher import ConsumerRecord
 from kafka.structs import OffsetAndMetadata, TopicPartition
+from pydantic import BaseModel
 
-from wildfire_events.codec import EventCodec, InvalidEvent
+from wildfire_events.codec import InvalidEvent
 
 LOGGER = logging.getLogger(__name__)
 RESTART_DELAY_SECONDS = 5
 
 
-class Projection(Protocol):
+def record_key(record: ConsumerRecord) -> bytes | None:
+    """The raw key; consumers are created without deserializers."""
+    return cast(bytes | None, record.key)
+
+
+def record_value(record: ConsumerRecord) -> bytes | None:
+    """The raw value (``None`` for a tombstone); consumers have no deserializers."""
+    return cast(bytes | None, record.value)
+
+
+class EventDecoder[E: BaseModel](Protocol):
+    """Decodes a record value or raises ``InvalidEvent``; ``EventCodec`` implements it."""
+
+    def decode(self, value: bytes | None) -> E: ...
+
+
+class Projection[E: BaseModel](Protocol):
     name: str
     topic: str
     group_id: str
-    codec: EventCodec[Any]
     tombstones: bool
+
+    @property
+    def codec(self) -> EventDecoder[E]: ...
 
     def initialize(self, connection: psycopg.Connection) -> None: ...
 
     def apply(
-        self, connection: psycopg.Connection, events: Sequence[tuple[ConsumerRecord, Any]]
+        self, connection: psycopg.Connection, events: Sequence[tuple[ConsumerRecord, E | None]]
+    ) -> None:
+        """Apply decoded events; the event is ``None`` for a tombstone."""
+        ...
+
+
+class OffsetCommitter(Protocol):
+    def commit(
+        self,
+        offsets: Mapping[TopicPartition, OffsetAndMetadata] | None = None,
+        timeout_ms: int | None = None,
     ) -> None: ...
+
+
+class DeadLetterSink(Protocol):
+    def send(self, record: ConsumerRecord, group_id: str, reason: str) -> None: ...
 
 
 @dataclass
@@ -63,31 +96,33 @@ class DeadLetters:
             ("dlq.error", reason[:1000].encode()),
             ("dlq.failed.at", datetime.now(UTC).isoformat().encode()),
         ]
-        self.producer.send(self.topic, key=record.key, value=record.value, headers=headers).get(
-            timeout=60
+        future = self.producer.send(
+            self.topic, key=record_key(record), value=record_value(record), headers=headers
         )
+        future.get(timeout=60)  # pyright: ignore[reportUnknownMemberType] -- untyped stub
         LOGGER.warning(
             "Dead-lettered %s[%d]@%d: %s", record.topic, record.partition, record.offset, reason
         )
 
 
-def process_batch(
-    projection: Projection,
+def process_batch[E: BaseModel](
+    projection: Projection[E],
     connection: psycopg.Connection,
-    consumer: KafkaConsumer,
-    dead_letters: DeadLetters,
+    consumer: OffsetCommitter,
+    dead_letters: DeadLetterSink,
     partition: TopicPartition,
     records: Sequence[ConsumerRecord],
 ) -> tuple[int, int]:
     """Project one partition's records and commit; returns (applied, dead-lettered)."""
-    valid: list[tuple[ConsumerRecord, Any]] = []
+    valid: list[tuple[ConsumerRecord, E | None]] = []
     rejected = 0
     for record in records:
-        if record.value is None and projection.tombstones:
+        value = record_value(record)
+        if value is None and projection.tombstones:
             valid.append((record, None))
             continue
         try:
-            valid.append((record, projection.codec.decode(record.value)))
+            valid.append((record, projection.codec.decode(value)))
         except InvalidEvent as exc:
             dead_letters.send(record, projection.group_id, str(exc))
             rejected += 1
@@ -100,7 +135,7 @@ def process_batch(
     except psycopg.Error as exc:
         LOGGER.warning("%s: batch rejected by the database (%s); retrying singly",
                        projection.name, exc)
-        applied = []
+        applied: list[tuple[ConsumerRecord, E | None]] = []
         for item in valid:
             try:
                 with connection.transaction():
@@ -118,20 +153,20 @@ def process_batch(
     return len(valid), rejected
 
 
-class ProjectionWorker:
+class ProjectionWorker[E: BaseModel]:
     def __init__(
         self,
-        projection: Projection,
+        projection: Projection[E],
         bootstrap_servers: str,
         database_url: str,
-        dead_letters: DeadLetters,
+        dead_letters: DeadLetterSink,
         stop: Event,
     ) -> None:
-        self.projection = projection
-        self.bootstrap_servers = bootstrap_servers
-        self.database_url = database_url
-        self.dead_letters = dead_letters
-        self.stop = stop
+        self.projection: Projection[E] = projection
+        self.bootstrap_servers: str = bootstrap_servers
+        self.database_url: str = database_url
+        self.dead_letters: DeadLetterSink = dead_letters
+        self.stop: Event = stop
 
     def _consumer(self) -> KafkaConsumer:
         return KafkaConsumer(
@@ -151,11 +186,11 @@ class ProjectionWorker:
             except Exception:
                 LOGGER.exception(
                     "%s: stopped by a transient error; restarting from the last committed offset "
-                    "in %ds",
+                    + "in %ds",
                     self.projection.name,
                     RESTART_DELAY_SECONDS,
                 )
-                self.stop.wait(RESTART_DELAY_SECONDS)
+                _ = self.stop.wait(RESTART_DELAY_SECONDS)
 
     def run(self) -> None:
         with psycopg.connect(self.database_url, autocommit=True, connect_timeout=10) as connection:

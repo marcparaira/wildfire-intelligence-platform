@@ -1,6 +1,7 @@
 import io
 import json
 from datetime import UTC, datetime
+from email.message import Message
 from threading import Event
 from typing import Self
 from urllib.error import HTTPError
@@ -17,7 +18,7 @@ CELL = weather.forecast_cells()[0]
 
 class Response:
     def __init__(self, payload: object) -> None:
-        self.payload = payload
+        self.payload: object = payload
 
     def __enter__(self) -> Self:
         return self
@@ -29,8 +30,8 @@ class Response:
         return json.dumps(self.payload).encode()
 
 
-def hourly(**overrides: list) -> dict:
-    values = {
+def hourly(**overrides: list[object]) -> dict[str, dict[str, list[object]]]:
+    values: dict[str, list[object]] = {
         "time": ["2026-03-05T00:00", "2026-03-05T01:00"],
         "temperature_2m": [28.5, 28.0],
         "precipitation": [0.2, 0],
@@ -53,6 +54,7 @@ def test_fetch_chunk_builds_one_event_per_cell_with_explicit_units(
     urls: list[str] = []
 
     def fake_urlopen(url: str, timeout: int) -> Response:
+        del timeout
         urls.append(url)
         return Response([hourly(), hourly()])
 
@@ -77,17 +79,23 @@ def test_fetch_chunk_builds_one_event_per_cell_with_explicit_units(
 def test_fetch_chunk_skips_invalid_cells(monkeypatch: pytest.MonkeyPatch) -> None:
     second = weather.forecast_cells()[1]
     payload = [hourly(precipitation=[0.2]), hourly()]
-    monkeypatch.setattr(weather, "urlopen", lambda *_args, **_kwargs: Response(payload))
+
+    def respond(*_args: object, **_kwargs: object) -> Response:
+        return Response(payload)
+
+    monkeypatch.setattr(weather, "urlopen", respond)
     assert [item.cell for item in weather.fetch_chunk([CELL, second], GENERATED)] == [second.cell]
 
 
 def test_rate_limit_asks_the_scheduler_to_retry_later(monkeypatch: pytest.MonkeyPatch) -> None:
     def limited(url: str, **_kwargs: object) -> None:
-        raise HTTPError(url, 429, "Too Many Requests", {"Retry-After": "17"}, io.BytesIO())
+        headers = Message()
+        headers["Retry-After"] = "17"
+        raise HTTPError(url, 429, "Too Many Requests", headers, io.BytesIO())
 
     monkeypatch.setattr(weather, "urlopen", limited)
     with pytest.raises(RetryLater) as raised:
-        weather.fetch_chunk([CELL], GENERATED)
+        _ = weather.fetch_chunk([CELL], GENERATED)
     assert raised.value.seconds == 17
 
 

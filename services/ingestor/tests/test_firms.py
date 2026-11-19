@@ -1,8 +1,9 @@
-import json
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from email.message import Message
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 from urllib.error import HTTPError
 
 import pytest
@@ -10,7 +11,6 @@ import pytest
 from wildfire_events.models import FirmsDetection
 from wildfire_ingestor.firms import fetch_csv, parse_csv, select_countries
 from wildfire_ingestor.log import PublishedEvents
-from wildfire_ingestor.migrate_legacy import convert
 from wildfire_ingestor.publisher import Publisher
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -44,7 +44,7 @@ def test_normalizes_modis_rows_and_missing_frp() -> None:
 )
 def test_rejects_malformed_responses(text: str) -> None:
     with pytest.raises(ValueError):
-        parse_csv(text, "VIIRS_NOAA20_NRT")
+        _ = parse_csv(text, "VIIRS_NOAA20_NRT")
 
 
 def test_rejects_bad_rows_without_dropping_good_ones() -> None:
@@ -65,23 +65,24 @@ def test_rejects_bad_rows_without_dropping_good_ones() -> None:
 
 def test_requires_key_product_and_valid_day_range() -> None:
     with pytest.raises(ValueError, match="FIRMS_MAP_KEY"):
-        fetch_csv("", "MODIS_NRT", 1)
+        _ = fetch_csv("", "MODIS_NRT", 1)
     with pytest.raises(ValueError, match="Unknown"):
-        fetch_csv("key", "LANDSAT", 1)
+        _ = fetch_csv("key", "LANDSAT", 1)
     with pytest.raises(ValueError, match="between 1 and 5"):
-        fetch_csv("key", "MODIS_NRT", 6)
+        _ = fetch_csv("key", "MODIS_NRT", 6)
 
 
 def test_firms_request_uses_product_and_region_and_redacts_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fail(url: str, *, timeout: int) -> None:
+        del timeout
         assert url.endswith("/test-key/VIIRS_SNPP_NRT/92,-12,156,29/2")
-        raise HTTPError(url, 403, "Forbidden", {}, BytesIO())
+        raise HTTPError(url, 403, "Forbidden", Message(), BytesIO())
 
     monkeypatch.setattr("wildfire_ingestor.firms.urlopen", fail)
     with pytest.raises(RuntimeError, match="HTTP 403") as error:
-        fetch_csv("test-key", "VIIRS_SNPP_NRT", 2)
+        _ = fetch_csv("test-key", "VIIRS_SNPP_NRT", 2)
     assert "test-key" not in str(error.value)
 
 
@@ -111,16 +112,33 @@ def test_country_filter_covers_selected_countries_and_excludes_sea_and_neighbors
     assert select_countries(detections) == detections[: len(cities)]
 
 
+@dataclass(frozen=True)
+class FakeMetadata:
+    timestamp: int = 1_000
+
+
+class FakeResult:
+    def get(self, timeout: float | None = None) -> FakeMetadata:
+        del timeout
+        return FakeMetadata()
+
+
 class FakeProducer:
     def __init__(self) -> None:
-        self.sent: list[tuple[str, bytes, bytes, list]] = []
+        self.sent: list[tuple[str, object, object, list[tuple[str, bytes]]]] = []
 
-    def send(self, topic: str, *, key: bytes, value: bytes, headers: list) -> SimpleNamespace:
-        self.sent.append((topic, key, value, headers))
-        return SimpleNamespace(get=lambda timeout: SimpleNamespace(timestamp=1_000))
+    def send(
+        self,
+        topic: str,
+        value: object = None,
+        key: object = None,
+        headers: Sequence[tuple[str, bytes]] | None = None,
+    ) -> FakeResult:
+        self.sent.append((topic, key, value, list(headers or [])))
+        return FakeResult()
 
-    def flush(self) -> None:
-        pass
+    def flush(self, timeout: float | None = None) -> None:
+        del timeout
 
 
 class FakeCodec:
@@ -134,7 +152,7 @@ def test_publisher_keys_by_h3_cell_and_never_republishes() -> None:
     published = PublishedEvents(window=timedelta(days=3))
     publisher = Publisher(
         producer=producer,
-        codec=FakeCodec(),  # type: ignore[arg-type]
+        codec=FakeCodec(),
         topic="firms.detections",
         key=lambda event: event.h3_cell,
         event_id=lambda event: event.event_id,
@@ -144,7 +162,7 @@ def test_publisher_keys_by_h3_cell_and_never_republishes() -> None:
     assert publisher.publish([*events, events[0]]) == (2, 1)
     assert publisher.publish(events) == (0, 2)
     topic, key, _, headers = producer.sent[0]
-    assert (topic, key.decode()) == ("firms.detections", events[0].h3_cell)
+    assert (topic, key) == ("firms.detections", events[0].h3_cell.encode())
     assert headers == [("event_id", str(events[0].event_id).encode())]
     assert len(published) == 2
 
@@ -156,19 +174,3 @@ def test_published_events_expire_after_the_window() -> None:
     published.prune(now=7200)
     assert "old" not in published and "new" in published
 
-
-def test_legacy_events_keep_the_live_event_id() -> None:
-    live = parse_csv(VIIRS, "VIIRS_NOAA20_NRT").detections[0]
-    legacy = {
-        "schema_version": 1,
-        "source": "VIIRS_NOAA20_NRT",
-        "satellite": "N20",
-        "observed_at": "2026-03-05T00:07:00Z",
-        "latitude": "0.5234",
-        "longitude": "114.1234",
-        "attributes": live.attributes,
-    }
-    converted = convert(json.dumps(legacy).encode(), live.ingested_at)
-    assert converted == live
-    with pytest.raises(ValueError):
-        convert(json.dumps({**legacy, "schema_version": 2}).encode(), live.ingested_at)

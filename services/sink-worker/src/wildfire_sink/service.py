@@ -5,12 +5,15 @@ import os
 import signal
 from dataclasses import dataclass
 from threading import Event, Thread
+from types import FrameType
+
+from pydantic import BaseModel
 
 from wildfire_events.kafka import ensure_topics, idempotent_producer
 from wildfire_events.registry import SchemaRegistry
 from wildfire_events.topics import ALL_TOPICS, SINK_WORKER_DLQ
 from wildfire_sink.detections import DetectionProjection
-from wildfire_sink.runner import DeadLetters, Projection, ProjectionWorker
+from wildfire_sink.runner import DeadLetters, DeadLetterSink, Projection, ProjectionWorker
 from wildfire_sink.weather import WeatherProjection
 
 LOGGER = logging.getLogger(__name__)
@@ -33,8 +36,11 @@ class Settings:
         )
 
 
-def projections(registry: SchemaRegistry) -> list[Projection]:
-    return [DetectionProjection(registry), WeatherProjection(registry)]
+def worker_thread[E: BaseModel](
+    projection: Projection[E], settings: Settings, dead_letters: DeadLetterSink, stop: Event
+) -> Thread:
+    worker = ProjectionWorker(projection, settings.kafka, settings.database_url, dead_letters, stop)
+    return Thread(target=worker.run_until_stopped, name=projection.name)
 
 
 def main() -> None:
@@ -47,16 +53,15 @@ def main() -> None:
     producer = idempotent_producer(settings.kafka, "sink-worker-dlq")
     dead_letters = DeadLetters(producer, SINK_WORKER_DLQ.name)
     stop = Event()
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
+
+    def request_stop(_signum: int, _frame: FrameType | None) -> None:
+        stop.set()
+
+    _ = signal.signal(signal.SIGTERM, request_stop)
+    _ = signal.signal(signal.SIGINT, request_stop)
     workers = [
-        Thread(
-            target=ProjectionWorker(
-                projection, settings.kafka, settings.database_url, dead_letters, stop
-            ).run_until_stopped,
-            name=projection.name,
-        )
-        for projection in projections(registry)
+        worker_thread(DetectionProjection(registry), settings, dead_letters, stop),
+        worker_thread(WeatherProjection(registry), settings, dead_letters, stop),
     ]
     for worker in workers:
         worker.start()

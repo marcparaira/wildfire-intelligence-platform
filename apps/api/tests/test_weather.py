@@ -2,15 +2,28 @@ import os
 import uuid
 from datetime import UTC, datetime
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
+from pydantic import BaseModel
 
 from wildfire_api.main import app
+from wildfire_api.weather import WeatherForecast
 
-client = TestClient(app)
+client: httpx.Client = TestClient(app)
+
+
+class ErrorBody(BaseModel):
+    detail: str
+
+
+def forecast(params: dict[str, str | int]) -> WeatherForecast:
+    response = client.get("/weather/forecast", params=params)
+    assert response.status_code == 200
+    return WeatherForecast.model_validate_json(response.content)
 
 
 @pytest.mark.parametrize(
@@ -34,7 +47,9 @@ def test_weather_database_failure_is_explicit(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:1/unavailable")
     response = client.get("/weather/forecast")
     assert response.status_code == 503
-    assert response.json()["detail"] == "Weather data is currently unavailable"
+    assert ErrorBody.model_validate_json(response.content).detail == (
+        "Weather data is currently unavailable"
+    )
 
 
 @pytest.mark.skipif(
@@ -46,10 +61,10 @@ def test_weather_forecasts_are_read_from_the_projection(monkeypatch: pytest.Monk
     schema = f"api_weather_test_{uuid.uuid4().hex}"
     first, second = datetime(2026, 3, 5, 0, tzinfo=UTC), datetime(2026, 3, 5, 1, tzinfo=UTC)
     with psycopg.connect(database_url, autocommit=True) as db:
-        db.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        _ = db.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
         try:
-            db.execute(sql.SQL("SET search_path TO {}, public").format(sql.Identifier(schema)))
-            db.execute(
+            _ = db.execute(sql.SQL("SET search_path TO {}, public").format(sql.Identifier(schema)))
+            _ = db.execute(
                 """
                 CREATE TABLE weather_cells (
                     cell text PRIMARY KEY, latitude double precision, longitude double precision,
@@ -75,29 +90,26 @@ def test_weather_forecasts_are_read_from_the_projection(monkeypatch: pytest.Monk
                 "DATABASE_URL",
                 make_conninfo(database_url, options=f"-csearch_path={schema},public"),
             )
-            params = {"west": 108, "south": -5, "east": 120, "north": 8}
-            response = client.get(
-                "/weather/forecast", params={**params, "at": second.isoformat()}
-            )
-            assert response.status_code == 200
-            result = response.json()
-            assert [datetime.fromisoformat(value) for value in result["times"]] == [first, second]
-            assert [item["cell"] for item in result["items"]] == ["near"]
-            assert result["items"][0]["temperature_c"] == 29.0
-            assert result["items"][0]["boundary"][0] == [113, -1]
-            assert datetime.fromisoformat(result["generated_at"]).hour == 21
-            assert datetime.fromisoformat(result["oldest_generated_at"]).hour == 18
+            params: dict[str, str | int] = {"west": 108, "south": -5, "east": 120, "north": 8}
+            result = forecast({**params, "at": second.isoformat()})
+            assert result.times == [first, second]
+            assert [item.cell for item in result.items] == ["near"]
+            assert result.items[0].temperature_c == 29.0
+            assert result.items[0].boundary[0] == (113, -1)
+            assert result.generated_at.hour == 21
+            assert result.oldest_generated_at.hour == 18
 
-            everywhere = client.get("/weather/forecast", params={"at": first.isoformat()})
-            assert len(everywhere.json()["items"]) == 2
+            assert len(forecast({"at": first.isoformat()}).items) == 2
             missing = client.get(
                 "/weather/forecast", params={"at": "2026-03-06T00:00:00+00:00"}
             )
             assert missing.status_code == 422
 
-            db.execute("TRUNCATE weather_hourly")
+            _ = db.execute("TRUNCATE weather_hourly")
             empty = client.get("/weather/forecast")
             assert empty.status_code == 503
-            assert empty.json()["detail"] == "No weather forecast has been ingested yet"
+            assert ErrorBody.model_validate_json(empty.content).detail == (
+                "No weather forecast has been ingested yet"
+            )
         finally:
-            db.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+            _ = db.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))

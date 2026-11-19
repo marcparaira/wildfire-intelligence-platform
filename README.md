@@ -131,22 +131,6 @@ again after pulling configuration changes.
 The local database uses development-only credentials from `compose.yaml`.
 Do not use these defaults outside a local development environment.
 
-### Upgrading from Phase 5
-
-Phase 6 replaces the `processor` service and the `firms_detections` and
-`weather_forecasts` tables with the sink worker's `fire_detections`,
-`weather_cells`, and `weather_hourly` projections. The old tables are no longer
-read and can be dropped. To carry detections from the old
-`firms.detections.v1` topic into the new log, run once:
-
-```sh
-podman compose exec ingestor python -m wildfire_ingestor.migrate_legacy
-```
-
-Migrated events get the same event IDs as live ingestion, so running the
-command again, or after the ingestor has already fetched the same days,
-publishes nothing twice.
-
 ## Hotspot dashboard
 
 The dashboard displays detections from the PostGIS projection. By default

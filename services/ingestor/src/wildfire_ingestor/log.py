@@ -16,7 +16,15 @@ LOGGER = logging.getLogger(__name__)
 EVENT_ID_HEADER = "event_id"
 
 
-def _assigned_consumer(bootstrap_servers: str, topic: str) -> tuple[KafkaConsumer, list]:
+def _behind(consumer: KafkaConsumer, partition: TopicPartition, end: int) -> bool:
+    """Whether the consumer has not yet read up to ``end`` (unknown position counts)."""
+    position = consumer.position(partition)
+    return position is None or position < end
+
+
+def _assigned_consumer(
+    bootstrap_servers: str, topic: str
+) -> tuple[KafkaConsumer, list[TopicPartition]]:
     consumer = KafkaConsumer(
         bootstrap_servers=bootstrap_servers,
         group_id=None,
@@ -39,7 +47,7 @@ def latest_publish_time(bootstrap_servers: str, topic: str) -> datetime | None:
         pending = {tp for tp in assignment if end[tp] > 0}
         for tp in pending:
             consumer.seek(tp, end[tp] - 1)
-        newest = None
+        newest: int | None = None
         deadline = time.monotonic() + 30
         while pending and time.monotonic() < deadline:
             for tp, records in consumer.poll(timeout_ms=1000).items():
@@ -55,9 +63,9 @@ class PublishedEvents:
     """Event IDs already in a topic within a sliding publish-time window."""
 
     def __init__(self, window: timedelta) -> None:
-        self.window = window
+        self.window: timedelta = window
         self._ids: dict[str, float] = {}
-        self._lock = Lock()
+        self._lock: Lock = Lock()
 
     def __contains__(self, event_id: object) -> bool:
         with self._lock:
@@ -88,7 +96,7 @@ class PublishedEvents:
             starts = consumer.offsets_for_times(
                 {tp: int(since.timestamp() * 1000) for tp in assignment}
             )
-            pending = set()
+            pending: set[TopicPartition] = set()
             for tp in assignment:
                 start = starts.get(tp)
                 consumer.seek(tp, end[tp] if start is None else start.offset)
@@ -102,7 +110,7 @@ class PublishedEvents:
                             if key == EVENT_ID_HEADER:
                                 self.add(value.decode(), record.timestamp / 1000)
                                 loaded += 1
-                pending = {tp for tp in pending if consumer.position(tp) < end[tp]}
+                pending = {tp for tp in pending if _behind(consumer, tp, end[tp])}
             if pending:
                 raise TimeoutError(f"timed out reading published events from {topic}")
         finally:

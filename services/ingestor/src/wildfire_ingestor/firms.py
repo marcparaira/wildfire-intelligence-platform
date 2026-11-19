@@ -4,11 +4,12 @@ import argparse
 import csv
 import logging
 import math
-import os
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from http.client import HTTPResponse
 from pathlib import Path
+from typing import cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import urlopen
@@ -16,14 +17,19 @@ from urllib.request import urlopen
 from pydantic import ValidationError
 
 from wildfire_events.cells import partition_cell
-from wildfire_events.models import FIRMS_PRODUCTS, FirmsDetection, detection_event_id
+from wildfire_events.models import (
+    FIRMS_PRODUCTS,
+    FirmsDetection,
+    detection_event_id,
+    is_firms_product,
+)
+from wildfire_ingestor.config import MAX_DAY_RANGE, Settings, detection_publisher, read_map_key
 from wildfire_ingestor.countries import REGION_BOUNDS, CountryFilter, selected_countries
 from wildfire_ingestor.publisher import Publisher
 
 LOGGER = logging.getLogger(__name__)
 REQUIRED_FIELDS = {"latitude", "longitude", "acq_date", "acq_time", "satellite"}
 FIRMS_AREA_URL = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
-MAX_DAY_RANGE = 5
 
 
 @dataclass
@@ -42,7 +48,7 @@ def _frp(value: str | None) -> float | None:
 
 def parse_csv(text: str, product: str, ingested_at: datetime | None = None) -> ParsedCsv:
     """Normalize a FIRMS CSV. Malformed responses raise; malformed rows are rejected."""
-    if product not in FIRMS_PRODUCTS:
+    if not is_firms_product(product):
         raise ValueError(f"Unknown FIRMS product {product}")
     ingested_at = ingested_at or datetime.now(UTC)
     reader = csv.DictReader(text.splitlines())
@@ -96,7 +102,7 @@ def fetch_csv(map_key: str, product: str, day_range: int) -> str:
     bounds = ",".join(str(int(value)) for value in REGION_BOUNDS)
     url = f"{FIRMS_AREA_URL}/{quote(map_key, safe='')}/{product}/{bounds}/{day_range}"
     try:
-        with urlopen(url, timeout=120) as response:
+        with cast(HTTPResponse, urlopen(url, timeout=120)) as response:
             return response.read().decode("utf-8-sig")
     except HTTPError as exc:
         raise RuntimeError(f"FIRMS request failed with HTTP {exc.code}") from None
@@ -146,25 +152,27 @@ def publish_csv(text: str, product: str, publisher: Publisher[FirmsDetection]) -
     )
 
 
-def read_map_key() -> str:
-    """FIRMS_MAP_KEY, or the contents of the file named by FIRMS_MAP_KEY_FILE."""
-    key = os.environ.get("FIRMS_MAP_KEY", "").strip()
-    path = os.environ.get("FIRMS_MAP_KEY_FILE", "")
-    if not key and path and Path(path).is_file():
-        key = Path(path).read_text(encoding="utf-8").strip()
-    return key
+class Arguments(argparse.Namespace):
+    product: str = "VIIRS_NOAA20_NRT"
+    days: int = 1
+    csv: str | None = None
+    key_stdin: bool = False
 
 
 def main() -> None:
     """One-off publish of a FIRMS product from the API or a local CSV."""
-    from wildfire_ingestor.service import Settings, detection_publisher
-
     parser = argparse.ArgumentParser(description="Publish FIRMS detections once")
-    parser.add_argument("--product", choices=sorted(FIRMS_PRODUCTS), default="VIIRS_NOAA20_NRT")
-    parser.add_argument("--days", type=int, default=1, help="FIRMS day range (1-5)")
-    parser.add_argument("--csv", help="Use a local FIRMS CSV, or - for stdin, instead of the API")
-    parser.add_argument("--key-stdin", action="store_true", help="Read the map key from stdin")
-    args = parser.parse_args()
+    _ = parser.add_argument(
+        "--product", choices=sorted(FIRMS_PRODUCTS), default="VIIRS_NOAA20_NRT"
+    )
+    _ = parser.add_argument("--days", type=int, default=1, help="FIRMS day range (1-5)")
+    _ = parser.add_argument(
+        "--csv", help="Use a local FIRMS CSV, or - for stdin, instead of the API"
+    )
+    _ = parser.add_argument(
+        "--key-stdin", action="store_true", help="Read the map key from stdin"
+    )
+    args = parser.parse_args(namespace=Arguments())
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     try:
         if args.csv and args.key_stdin:

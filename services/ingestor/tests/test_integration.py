@@ -6,7 +6,9 @@ Skipped unless INGESTOR_TEST_KAFKA and INGESTOR_TEST_SCHEMA_REGISTRY are set.
 import os
 import uuid
 from datetime import timedelta
+from http.client import HTTPResponse
 from pathlib import Path
+from typing import cast
 from urllib.request import Request, urlopen
 
 import pytest
@@ -31,7 +33,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "viirs_noaa20.csv"
 def test_a_restarted_ingestor_does_not_republish_what_is_in_the_log() -> None:
     topic = f"ingestor-test-{uuid.uuid4().hex[:12]}"
     admin = KafkaAdminClient(bootstrap_servers=KAFKA)
-    admin.create_topics([NewTopic(topic, 6, 1)])
+    admin.create_topics([NewTopic(topic, 6, 1)])  # pyright: ignore[reportUnknownMemberType]
     producer = idempotent_producer(KAFKA, "ingestor-test")
     codec = EventCodec(FirmsDetection, f"{topic}-value", SchemaRegistry(REGISTRY))
     events = parse_csv(FIXTURE.read_text(), "VIIRS_NOAA20_NRT").detections
@@ -56,13 +58,12 @@ def test_a_restarted_ingestor_does_not_republish_what_is_in_the_log() -> None:
         assert latest_publish_time(KAFKA, topic) is not None
     finally:
         producer.close()
-        admin.delete_topics([topic])
+        admin.delete_topics([topic])  # pyright: ignore[reportUnknownMemberType]
         admin.close()
         for suffix in ("", "?permanent=true"):
             try:
-                urlopen(
-                    Request(f"{REGISTRY}/subjects/{topic}-value{suffix}", method="DELETE"),
-                    timeout=10,
-                )
+                request = Request(f"{REGISTRY}/subjects/{topic}-value{suffix}", method="DELETE")
+                with cast(HTTPResponse, urlopen(request, timeout=10)):
+                    pass
             except OSError:
                 pass
