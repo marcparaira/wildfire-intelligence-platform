@@ -1,0 +1,14 @@
+# Build context for services built from the repository root.
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.egg-info
+**/node_modules
+**/dist
+**/tests
+.git
+.firms-map-key
+.env
+.env.*
+docs

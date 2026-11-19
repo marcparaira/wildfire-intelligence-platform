@@ -23,6 +23,7 @@ client = TestClient(app)
         "?date_from=2026-03-06&date_to=2026-03-05",
         "?date_from=not-a-date",
         "?limit=0",
+        "?product=LANDSAT",
     ],
 )
 def test_invalid_filters_are_rejected(query: str) -> None:
@@ -49,25 +50,34 @@ def test_hotspot_filters_dates_geometry_and_truncation(monkeypatch: pytest.Monke
             db.execute(sql.SQL("SET search_path TO {}, public").format(sql.Identifier(schema)))
             db.execute(
                 """
-                CREATE TABLE firms_detections (
-                    id bigint PRIMARY KEY, source text NOT NULL, satellite text NOT NULL,
-                    observed_at timestamptz NOT NULL, latitude numeric NOT NULL,
-                    longitude numeric NOT NULL, location geometry(Point, 4326) NOT NULL,
-                    attributes jsonb NOT NULL
+                CREATE TABLE fire_detections (
+                    id bigint PRIMARY KEY, event_id uuid NOT NULL, product text NOT NULL,
+                    instrument text NOT NULL, satellite text NOT NULL,
+                    observed_at timestamptz NOT NULL, latitude double precision NOT NULL,
+                    longitude double precision NOT NULL, location geometry(Point, 4326) NOT NULL,
+                    attributes jsonb NOT NULL, duplicate_of uuid
                 )
                 """
             )
             db.execute(
                 """
-                INSERT INTO firms_detections VALUES
-                (1, 'VIIRS_NOAA20_NRT', 'N20', '2026-03-05 00:00:00+00', 1, 114,
-                 ST_SetSRID(ST_MakePoint(114, 1), 4326), '{"frp":"12.5"}'),
-                (2, 'VIIRS_NOAA20_NRT', 'N20', '2026-03-05 23:59:59+00', 2, 115,
-                 ST_SetSRID(ST_MakePoint(115, 2), 4326), '{"confidence":"nominal"}'),
-                (3, 'VIIRS_NOAA20_NRT', 'N20', '2026-03-06 00:00:00+00', 3, 116,
-                 ST_SetSRID(ST_MakePoint(116, 3), 4326), '{}'),
-                (4, 'VIIRS_NOAA20_NRT', 'N20', '2026-03-05 12:00:00+00', 10, 100,
-                 ST_SetSRID(ST_MakePoint(100, 10), 4326), '{}')
+                INSERT INTO fire_detections VALUES
+                (1, gen_random_uuid(), 'VIIRS_NOAA20_NRT', 'VIIRS', 'N20',
+                 '2026-03-05 00:00:00+00', 1, 114,
+                 ST_SetSRID(ST_MakePoint(114, 1), 4326), '{"frp":"12.5"}', NULL),
+                (2, gen_random_uuid(), 'VIIRS_NOAA20_NRT', 'VIIRS', 'N20',
+                 '2026-03-05 23:59:59+00', 2, 115,
+                 ST_SetSRID(ST_MakePoint(115, 2), 4326), '{"confidence":"nominal"}', NULL),
+                (3, gen_random_uuid(), 'VIIRS_NOAA20_NRT', 'VIIRS', 'N20',
+                 '2026-03-06 00:00:00+00', 3, 116,
+                 ST_SetSRID(ST_MakePoint(116, 3), 4326), '{}', NULL),
+                (4, gen_random_uuid(), 'VIIRS_NOAA20_NRT', 'VIIRS', 'N20',
+                 '2026-03-05 12:00:00+00', 10, 100,
+                 ST_SetSRID(ST_MakePoint(100, 10), 4326), '{}', NULL),
+                (5, gen_random_uuid(), 'MODIS_NRT', 'MODIS', 'Aqua',
+                 '2026-03-05 00:04:00+00', 1.001, 114.001,
+                 ST_SetSRID(ST_MakePoint(114.001, 1.001), 4326), '{}',
+                 '00000000-0000-0000-0000-000000000001')
                 """
             )
             monkeypatch.setenv(
@@ -94,6 +104,16 @@ def test_hotspot_filters_dates_geometry_and_truncation(monkeypatch: pytest.Monke
             limited = client.get("/hotspots", params={**params, "limit": 1}).json()
             assert len(limited["items"]) == 1
             assert limited["truncated"] is True
+            with_duplicates = client.get(
+                "/hotspots", params={**params, "include_duplicates": "true"}
+            ).json()
+            assert [item["id"] for item in with_duplicates["items"]] == [2, 5, 1]
+            assert with_duplicates["items"][1]["duplicate_of"] is not None
+            modis = client.get(
+                "/hotspots",
+                params={**params, "include_duplicates": "true", "product": "MODIS_NRT"},
+            ).json()
+            assert [item["id"] for item in modis["items"]] == [5]
             assert client.get("/hotspots", params={"date_to": "2026-03-04"}).json() == {
                 "items": [],
                 "truncated": False,

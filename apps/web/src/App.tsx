@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import MapView from "./MapView";
 import { FRP_HIGH_COLOR, FRP_LOW_COLOR, FRP_UNAVAILABLE_COLOR, frpPosition, parseFrp } from "./frp";
@@ -39,8 +39,6 @@ function App() {
   const [weatherAt, setWeatherAt] = useState("");
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState("");
-  const [weatherReload, setWeatherReload] = useState(0);
-  const weatherForceRefresh = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -81,7 +79,6 @@ function App() {
       setWeatherForecast(null);
       setWeatherError("");
       setWeatherLoading(false);
-      weatherForceRefresh.current = false;
       return;
     }
 
@@ -95,14 +92,10 @@ function App() {
       params.set("north", String(north));
     }
     if (weatherAt) params.set("at", weatherAt);
-    if (weatherForceRefresh.current) {
-      params.set("refresh", "true");
-      weatherForceRefresh.current = false;
-    }
 
     setWeatherLoading(true);
     setWeatherError("");
-    fetch(`/api/weather/forecast?${params}`, { method: "POST", signal: controller.signal })
+    fetch(`/api/weather/forecast?${params}`, { signal: controller.signal })
       .then(async (response) => {
         if (response.status === 422 && weatherAt) {
           setWeatherAt("");
@@ -126,7 +119,7 @@ function App() {
         if (!controller.signal.aborted) setWeatherLoading(false);
       });
     return () => controller.abort();
-  }, [filters, weatherAt, weatherMetric, weatherReload]);
+  }, [filters, weatherAt, weatherMetric, refresh]);
 
   const hotspots = results?.items ?? [];
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId);
@@ -149,7 +142,7 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand"><h1>Wildfire Intelligence Platform</h1></div>
-        <span className="header-source">NASA FIRMS · VIIRS NOAA-20 NRT</span>
+        <span className="header-source">NASA FIRMS · VIIRS &amp; MODIS NRT</span>
       </header>
 
       <main className="workspace">
@@ -195,10 +188,6 @@ function App() {
                   {weatherMetrics.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}
                 </select>
               </label>
-              {weatherMetric && <button className="refresh-button" type="button" disabled={weatherLoading} onClick={() => {
-                weatherForceRefresh.current = true;
-                setWeatherReload((value) => value + 1);
-              }}>Refresh forecast</button>}
               <button className="refresh-button" type="button" onClick={() => setRefresh((value) => value + 1)}>Refresh data</button>
             </div>
           </div>
@@ -221,11 +210,11 @@ function App() {
                 disabled={weatherForecast.times.length < 2}
                 onChange={(event) => setWeatherAt(weatherForecast.times[Number(event.target.value)])}
               />
-              <span>Retrieved {formatWeatherTime(weatherForecast.generated_at)}</span>
+              <span>Forecast retrieved {formatWeatherTime(weatherForecast.generated_at)}</span>
             </div>
           )}
           {weatherLoading && <div className="map-message" role="status">Loading Open-Meteo forecast…</div>}
-          {weatherError && <div className="map-message map-error" role="alert">Could not load weather forecast: {weatherError}. Try again later.</div>}
+          {weatherError && <div className="map-message map-error" role="alert">Could not load weather forecast: {weatherError}.</div>}
           {loading && <div className="map-message" role="status">Loading observations…</div>}
           {error && <div className="map-message map-error" role="alert">Could not load observations: {error}. Check the API and try again.</div>}
           {!loading && !error && hotspots.length === 0 && <div className="map-message" role="status">No detections for these filters. Try a wider area or date range.</div>}
@@ -295,6 +284,7 @@ function DetectionDetails({ hotspot }: { hotspot: Hotspot }) {
     ["Observed", formatUtc(hotspot.observed_at)],
     ["Coordinates", `${hotspot.latitude.toFixed(5)}°, ${hotspot.longitude.toFixed(5)}°`],
     ["Satellite", hotspot.satellite],
+    ["Instrument", hotspot.instrument],
     ["Product", hotspot.source],
     ["Confidence", hotspot.attributes.confidence || "Not provided"],
     ["Fire radiative power", frp !== null ? `${frp} MW` : "Not provided"],

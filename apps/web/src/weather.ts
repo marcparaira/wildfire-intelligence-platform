@@ -1,10 +1,10 @@
 export interface WeatherPoint {
+  cell: string;
   latitude: number;
   longitude: number;
-  west: number;
-  south: number;
-  east: number;
-  north: number;
+  /** H3 cell boundary ring as [longitude, latitude] pairs. */
+  boundary: [number, number][];
+  generated_at: string;
   temperature_c: number | null;
   precipitation_mm: number | null;
   wind_speed_kmh: number | null;
@@ -13,6 +13,7 @@ export interface WeatherPoint {
 
 export interface WeatherForecast {
   generated_at: string;
+  oldest_generated_at: string;
   valid_at: string;
   times: string[];
   items: WeatherPoint[];

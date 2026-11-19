@@ -1,8 +1,8 @@
 # Wildfire Intelligence Platform
 **Technology Stack**
 
-**Version:** 0.1
-**Status:** Phase 1 foundation established; remaining decisions are subject to evaluation
+**Version:** 0.2
+**Status:** Phase 6 streaming backbone established; remaining decisions are subject to evaluation
 
 ## 1. Overview
 
@@ -24,9 +24,10 @@ studies. System architecture is documented separately.
 | Backend Container Runtime | Python on Alpine Linux | Selected |
 | Event Streaming | Apache Kafka | Selected |
 | Stream Processing | Quix Streams (Python) | Proposed |
-| Schema Registry | Apicurio Registry or Karapace | Proposed |
+| Schema Registry | Karapace (Confluent-compatible API, JSON Schema) | Selected |
+| Kafka Web UI | Kafbat Kafka UI | Selected |
 | Kafka Archiving | Python archiver in the sink worker | Proposed |
-| Spatial Indexing | H3 | Proposed |
+| Spatial Indexing | H3 (resolution-2 Kafka keys and weather grid) | Selected |
 | Browser Push | Server-Sent Events | Proposed |
 | Database | PostgreSQL, PostGIS | Selected |
 | Cloud Provider | Amazon Web Services (AWS) | Selected |
@@ -38,11 +39,13 @@ studies. System architecture is documented separately.
 ## 3. Containerization
 
 The local environment is defined in the repository-root `compose.yaml`; run
-`podman compose up --build` to start the web application, API,
-PostgreSQL/PostGIS, and Kafka.
+`podman compose up --build` to start the web application, API, ingestor, sink
+worker, PostgreSQL/PostGIS, Kafka, the Karapace schema registry, and Kafka UI.
 
-Application container definitions live alongside their source in `apps/web`
-and `apps/api`. All application services will run in individual Podman containers.
+Application container definitions live alongside their source in `apps/web`,
+`apps/api`, and `services/*`. The Python services are built from the repository
+root so they can include the shared `packages/events` contracts. All
+application services run in individual Podman containers.
 
 - Separate build and runtime environments.
 - Multi-stage container builds.

@@ -50,16 +50,16 @@
 Make Kafka the system of record: every observation, forecast, and user action
 is an event, and storage, alerts, and the live map are projections of the log.
 
-- Replace on-demand ingestion with scheduled producers for all FIRMS NRT
+- [x] Replace on-demand ingestion with scheduled producers for all FIRMS NRT
   products (VIIRS SNPP, NOAA-20, NOAA-21, and MODIS).
-- Publish Open-Meteo forecasts to Kafka on a schedule; keep the latest forecast
+- [x] Publish Open-Meteo forecasts to Kafka on a schedule; keep the latest forecast
   per grid cell in a compacted topic instead of fetching at request time.
-- Key events by H3 cell so spatially related data shares a partition.
-- Add a schema registry (Apicurio or Karapace) and register event schemas.
-- Route invalid events to dead-letter topics instead of stopping consumers.
-- Enable idempotent producers and deduplicate detections across sensors.
-- Add a Kafka web UI to the local environment.
-- Document rebuilding PostGIS by replaying topics from the beginning.
+- [x] Key events by H3 cell so spatially related data shares a partition.
+- [x] Add a schema registry (Apicurio or Karapace) and register event schemas.
+- [x] Route invalid events to dead-letter topics instead of stopping consumers.
+- [x] Enable idempotent producers and deduplicate detections across sensors.
+- [x] Add a Kafka web UI to the local environment.
+- [x] Document rebuilding PostGIS by replaying topics from the beginning.
 
 **Deliverable:** Continuous, schema-governed, replayable multi-source pipeline.
 

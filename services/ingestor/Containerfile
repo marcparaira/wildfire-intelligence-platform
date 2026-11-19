@@ -1,0 +1,22 @@
+# Build from the repository root so the shared events package is in the context:
+#   podman build -f services/ingestor/Containerfile .
+FROM docker.io/library/python:3.12-alpine AS build
+
+WORKDIR /build
+COPY packages/events ./packages/events
+COPY services/ingestor/pyproject.toml ./services/ingestor/
+COPY services/ingestor/src ./services/ingestor/src
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir ./packages/events ./services/ingestor
+
+FROM docker.io/library/python:3.12-alpine AS runtime
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN apk add --no-cache libstdc++ \
+    && addgroup -S app && adduser -S -G app app
+COPY --from=build /opt/venv /opt/venv
+USER app
+CMD ["python", "-m", "wildfire_ingestor"]
