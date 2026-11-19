@@ -14,6 +14,63 @@ services/
 docs/                    Requirements, architecture, decisions, and roadmap
 ```
 
+## Dashboard snapshot
+
+The dashboard displays satellite hotspot detections on a map, with geographic
+and date filters and recent observation details.
+
+![Wildfire hotspot dashboard](docs/architecture/dashboard-snapshot.png)
+
+## Architecture
+
+The diagram shows the services currently implemented in this repository. FIRMS
+ingestion is run on demand; the processor continuously consumes Kafka events.
+
+```mermaid
+flowchart TB
+    subgraph External["External Services"]
+        FIRMS["NASA FIRMS API"]
+        OSM["OpenStreetMap tile service"]
+    end
+
+    subgraph Ingestion["On-Demand Ingestion"]
+        INGEST["FIRMS ingestor<br/>Validate CSV and filter detections"]
+    end
+
+    subgraph Streaming["Event Streaming"]
+        KAFKA["Apache Kafka<br/>firms.detections.v1"]
+        PROC["FIRMS processor<br/>Validate and persist events"]
+        KAFKA --> PROC
+    end
+
+    subgraph Storage["Data Storage"]
+        DB[("PostgreSQL + PostGIS")]
+    end
+
+    subgraph Application["Dashboard and API"]
+        WEB["Web container<br/>Nginx static hosting and /api proxy"]
+        UI["Browser dashboard<br/>React + TypeScript + OpenLayers"]
+        API["REST API<br/>Python + FastAPI"]
+        WEB <--> UI
+        WEB -->|API proxy| API
+    end
+
+    FIRMS --> INGEST
+    INGEST -->|Country boundary filter| DB
+    INGEST --> KAFKA
+    PROC --> DB
+    API -->|Hotspot queries| DB
+    UI -->|Map tile requests| OSM
+
+    classDef external fill:#e0f2fe,stroke:#0284c7,color:#075985
+    classDef streaming fill:#fef3c7,stroke:#d97706,color:#92400e
+    classDef data fill:#dcfce7,stroke:#16a34a,color:#166534
+
+    class FIRMS,OSM external
+    class KAFKA,PROC streaming
+    class DB data
+```
+
 ## Prerequisites
 
 - Podman with `podman compose` support (or Docker Compose)
