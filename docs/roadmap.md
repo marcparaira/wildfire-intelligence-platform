@@ -45,19 +45,85 @@
 
 **Deliverable:** Combined fire and weather monitoring dashboard.
 
-## Phase 6 — Imagery and Operational Features
+## Phase 6 — Streaming Backbone
 
-- Integrate satellite imagery with layer and opacity controls.
-- Add historical hotspot views.
-- Introduce basic alerts and reporting.
+Make Kafka the system of record: every observation, forecast, and user action
+is an event, and storage, alerts, and the live map are projections of the log.
 
-**Deliverable:** First functional MVP.
+- Replace on-demand ingestion with scheduled producers for all FIRMS NRT
+  products (VIIRS SNPP, NOAA-20, NOAA-21, and MODIS).
+- Publish Open-Meteo forecasts to Kafka on a schedule; keep the latest forecast
+  per grid cell in a compacted topic instead of fetching at request time.
+- Key events by H3 cell so spatially related data shares a partition.
+- Add a schema registry (Apicurio or Karapace) and register event schemas.
+- Route invalid events to dead-letter topics instead of stopping consumers.
+- Enable idempotent producers and deduplicate detections across sensors.
+- Add a Kafka web UI to the local environment.
+- Document rebuilding PostGIS by replaying topics from the beginning.
 
-## Phase 7 — AWS Deployment
+**Deliverable:** Continuous, schema-governed, replayable multi-source pipeline.
+
+## Phase 7 — Real-Time Dashboard
+
+- Add an API consumer that pushes new detections and alerts to the browser
+  using Server-Sent Events.
+- Update the map live, without manual refresh.
+- Show observation and forecast freshness for each data source.
+- Add a pipeline status page with per-source freshness, throughput, consumer
+  lag, and dead-letter counts.
+
+**Deliverable:** Live dashboard with visible pipeline health.
+
+## Phase 8 — Stream Processing
+
+Use a Python stream-processing library (Quix Streams) for stateful and
+windowed processing.
+
+- Cluster detections into fire incidents by space and time, and track each
+  incident's lifecycle (new, growing, stable, inactive) in `fire.incidents`.
+- Enrich detections with the latest weather for their grid cell.
+- Compute a simple, documented risk indicator from fire activity and weather.
+- Produce hourly per-country detection and FRP statistics.
+- Display incidents, their growth over time, and weather context in the
+  dashboard.
+
+**Deliverable:** Incident-level situational awareness derived from the stream.
+
+## Phase 9 — Watch Areas, Alerts, and Field Reports
+
+- Let users draw watch areas, stored as events in a compacted topic.
+- Match incidents and risk conditions against watch areas and publish alerts.
+- Deliver alerts to the browser and to at least one external channel (email or
+  webhook), each as an independent consumer group.
+- Let responders confirm or dismiss detections with field reports, and record
+  alert acknowledgements as events.
+
+**Deliverable:** Event-driven alerting and two-way operational workflow.
+
+## Phase 10 — Air Quality, History, and Archive
+
+- Ingest air-quality data (Open-Meteo Air Quality and OpenAQ) and add a PM2.5
+  haze overlay.
+- Archive topics to object storage from the sink worker.
+- Add historical views and a time slider that replays the event history.
+- Export selected datasets and incident summaries.
+- Add a clearly labeled simulation producer that replays archived detections
+  at accelerated speed for demonstrations.
+- Stretch: ingest the JAXA Himawari-9 wildfire product (10-minute
+  geostationary detections).
+- Side task: add a satellite imagery basemap (for example, NASA GIBS) with
+  layer and opacity controls.
+
+**Deliverable:** First complete MVP.
+
+## Phase 11 — AWS Deployment
 
 - Provision infrastructure using AWS CDK.
+- Choose a cost-appropriate Kafka deployment (Amazon MSK Serverless or a
+  self-managed single broker) and document the trade-off.
 - Build and publish production container images.
-- Deploy the application and add monitoring and operational documentation.
+- Deploy the application and add monitoring, including consumer lag, and
+  operational documentation.
 - Publish a live demo and screenshots.
 
 **Deliverable:** Publicly demonstrable portfolio project.
