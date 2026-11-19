@@ -668,8 +668,10 @@ version = "0.2.0"
 source = { editable = "apps/api" }
 dependencies = [
     { name = "fastapi" },
+    { name = "kafka-python" },
     { name = "psycopg", extra = ["binary"] },
     { name = "uvicorn" },
+    { name = "wildfire-events" },
 ]
 
 [package.optional-dependencies]
@@ -683,10 +685,12 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28,<1.0" },
+    { name = "kafka-python", specifier = ">=2.2,<3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3,<9.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9,<1.0" },
     { name = "uvicorn", specifier = ">=0.34,<1.0" },
+    { name = "wildfire-events", editable = "packages/events" },
 ]
 provides-extras = ["dev"]
 

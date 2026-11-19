@@ -145,6 +145,16 @@ selecting a map point reopens observation details. **Refresh data** re-queries
 the database for detections and the forecast; it does not trigger ingestion.
 The map uses OpenStreetMap tiles and needs internet access for its basemap.
 
+The map updates live. The API streams new detections from Kafka to the browser
+with Server-Sent Events (`GET /events/detections`), and they appear without a
+refresh as soon as the ingestor publishes them. The indicator above the map
+shows the connection state, and **New since load** counts the detections that
+arrived live. Live detections follow the area and start date filters. If the
+end date is today, later detections keep appearing after midnight UTC.
+Cross-sensor duplicates are only resolved in PostGIS, so **Refresh data** can
+hide a live detection that turned out to be a duplicate. After a dropped
+connection the stream resumes where it stopped.
+
 Marker color and size use a fixed logarithmic fire radiative power (FRP) scale
 from 0 to 100 MW; values at or above 100 MW share the largest symbol, while
 the detail panel retains the measured value. Gray symbols indicate unavailable

@@ -65,12 +65,10 @@ is an event, and storage, alerts, and the live map are projections of the log.
 
 ## Phase 7 — Real-Time Dashboard
 
-- Add an API consumer that pushes new detections and alerts to the browser
-  using Server-Sent Events.
-- Update the map live, without manual refresh.
+- [x] Add an API consumer that pushes new detections and alerts to the browser using Server-Sent Events.
+- [x] Update the map live, without manual refresh.
 - Show observation and forecast freshness for each data source.
-- Add a pipeline status page with per-source freshness, throughput, consumer
-  lag, and dead-letter counts.
+- Add a pipeline status page with per-source freshness, throughput, consumer lag, and dead-letter counts.
 
 **Deliverable:** Live dashboard with visible pipeline health.
 

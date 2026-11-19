@@ -11,7 +11,7 @@ vi.mock("./MapView", () => ({
     weatherMetric: string;
     bounds: Bounds;
     areaBounds: Bounds | null;
-    onSelect: (id: number) => void;
+    onSelect: (eventId: string) => void;
   }) => (
     <div
       aria-label="Hotspot map"
@@ -21,7 +21,7 @@ vi.mock("./MapView", () => ({
       data-weather-metric={weatherMetric}
     >
       {hotspots.map((hotspot) => (
-        <button key={hotspot.id} onClick={() => onSelect(hotspot.id)}>Map point {hotspot.id}</button>
+        <button key={hotspot.event_id} onClick={() => onSelect(hotspot.event_id)}>Map point {hotspot.id ?? hotspot.event_id}</button>
       ))}
     </div>
   ),
@@ -178,7 +178,7 @@ describe("hotspot dashboard", () => {
 
   it("explains the scale and displays zero and unavailable FRP correctly", async () => {
     const zero = { ...observation, attributes: { frp: "0" } };
-    const invalid = { ...observation, id: 8, attributes: { frp: "-1" } };
+    const invalid = { ...observation, id: 8, event_id: "0b6c2d0e-1f2a-5b3c-8d4e-5f6a7b8c9d0e", attributes: { frp: "-1" } };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ items: [zero, invalid], truncated: false }),
