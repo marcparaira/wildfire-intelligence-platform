@@ -14,10 +14,10 @@
 
 **Data flow:** NASA FIRMS → Python Ingestor → Kafka → Processor → PostGIS
 
-- Ingest FIRMS detections for one pilot region.
-- Publish normalized Kafka events.
-- Validate and persist detections as geospatial points.
-- Deduplicate records and preserve source timestamps.
+- [x] Ingest FIRMS detections for one pilot region.
+- [x] Publish normalized Kafka events.
+- [x] Validate and persist detections as geospatial points.
+- [x] Deduplicate records and preserve source timestamps.
 
 **Deliverable:** Tested, repeatable satellite-data ingestion pipeline.
 

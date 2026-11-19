@@ -33,8 +33,11 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
     ports:
       - "127.0.0.1:${KAFKA_PORT:-19092}:9094"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
     healthcheck:
       test:
         [
@@ -68,6 +71,18 @@ services:
       retries: 5
       start_period: 10s
 
+  processor:
+    build:
+      context: ./services/firms-pipeline
+      dockerfile: Containerfile
+    environment:
+      DATABASE_URL: postgresql://wildfire:wildfire_dev@db:5432/wildfire
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
   web:
     build:
       context: ./apps/web
@@ -86,3 +101,4 @@ services:
 
 volumes:
   postgres-data:
+  kafka-data:

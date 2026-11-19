@@ -15,6 +15,7 @@ coverage/
 .env
 .env.*
 !.env.example
+.firms-map-key
 postgres-data/
 kafka-data/
 
