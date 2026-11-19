@@ -134,6 +134,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 }
 .map-summary strong { margin-left: 4px; color: #27332d; font-weight: 600; font-variant-numeric: tabular-nums; }
 .limit-label { color: #8d4a19; font-weight: 600; }
+.live-status { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-weight: 600; color: #5d6a63; }
+.live-status i { width: 8px; height: 8px; border-radius: 50%; background: #9aa59f; }
+.live-status[data-status="live"] { color: #23663f; }
+.live-status[data-status="live"] i { background: #2f9e5b; box-shadow: 0 0 0 3px rgba(47, 158, 91, 0.18); }
+.live-status[data-status="reconnecting"] { color: #8d4a19; }
+.live-status[data-status="reconnecting"] i { background: #d97706; }
 .weather-timeline {
   display: flex;
   align-items: center;

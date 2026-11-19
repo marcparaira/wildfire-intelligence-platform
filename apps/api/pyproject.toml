@@ -9,7 +9,9 @@ description = "Wildfire Intelligence Platform API"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "wildfire-events",
     "fastapi>=0.115,<1.0",
+    "kafka-python>=2.2,<3",
     "psycopg[binary]>=3.2,<4",
     "uvicorn>=0.34,<1.0",
 ]
@@ -33,3 +35,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["wildfire_api", "wildfire_events"]

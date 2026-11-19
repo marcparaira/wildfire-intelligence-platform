@@ -1,16 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import MapView from "./MapView";
 import { FRP_HIGH_COLOR, FRP_LOW_COLOR, FRP_UNAVAILABLE_COLOR, frpPosition, parseFrp } from "./frp";
-import { DEFAULT_VIEW_BOUNDS, formatUtc, isRegionId, regions } from "./hotspots";
-import type { Hotspot, HotspotResults, RegionId } from "./hotspots";
+import { DEFAULT_VIEW_BOUNDS, formatUtc, inDateRange, isRegionId, mergeHotspots, regions, todayUtc } from "./hotspots";
+import type { DateRange, Hotspot, HotspotResults, RegionId } from "./hotspots";
+import { useLiveDetections } from "./live";
+import type { LiveStatus } from "./live";
 import { formatWeatherTime, isWeatherMetric, weatherLegend, weatherMetrics } from "./weather";
 import type { WeatherForecast, WeatherMetric } from "./weather";
 
-interface Filters {
+interface Filters extends DateRange {
   region: RegionId | "";
-  dateFrom: string;
-  dateTo: string;
 }
 
 function initialFilters(): Filters {
@@ -20,14 +20,35 @@ function initialFilters(): Filters {
     region: "",
     dateFrom: from.toISOString().slice(0, 10),
     dateTo: now.toISOString().slice(0, 10),
+    openEnded: true,
   };
 }
+
+function regionQuery(region: RegionId | ""): URLSearchParams {
+  const params = new URLSearchParams();
+  if (region) {
+    const [west, south, east, north] = regions[region].bounds;
+    params.set("west", String(west));
+    params.set("south", String(south));
+    params.set("east", String(east));
+    params.set("north", String(north));
+  }
+  return params;
+}
+
+const liveLabels: Record<LiveStatus, string> = {
+  connecting: "Connecting…",
+  live: "Live",
+  reconnecting: "Reconnecting…",
+  unavailable: "Live updates unavailable",
+};
 
 function App() {
   const [draft, setDraft] = useState(initialFilters);
   const [filters, setFilters] = useState(draft);
   const [results, setResults] = useState<HotspotResults | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [liveItems, setLiveItems] = useState<Hotspot[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
@@ -42,17 +63,9 @@ function App() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const params = new URLSearchParams({
-      date_from: filters.dateFrom,
-      date_to: filters.dateTo,
-    });
-    if (filters.region) {
-      const [west, south, east, north] = regions[filters.region].bounds;
-      params.set("west", String(west));
-      params.set("south", String(south));
-      params.set("east", String(east));
-      params.set("north", String(north));
-    }
+    const params = regionQuery(filters.region);
+    params.set("date_from", filters.dateFrom);
+    params.set("date_to", filters.dateTo);
     setLoading(true);
     setError("");
     setResults(null);
@@ -83,14 +96,7 @@ function App() {
     }
 
     const controller = new AbortController();
-    const params = new URLSearchParams();
-    if (filters.region) {
-      const [west, south, east, north] = regions[filters.region].bounds;
-      params.set("west", String(west));
-      params.set("south", String(south));
-      params.set("east", String(east));
-      params.set("north", String(north));
-    }
+    const params = regionQuery(filters.region);
     if (weatherAt) params.set("at", weatherAt);
 
     setWeatherLoading(true);
@@ -121,8 +127,23 @@ function App() {
     return () => controller.abort();
   }, [filters, weatherAt, weatherMetric, refresh]);
 
-  const hotspots = results?.items ?? [];
-  const selected = hotspots.find((hotspot) => hotspot.id === selectedId);
+  useEffect(() => {
+    setLiveItems([]);
+  }, [filters]);
+
+  const liveQuery = useMemo(() => regionQuery(filters.region).toString(), [filters.region]);
+  const liveStatus = useLiveDetections(liveQuery, (batch) => {
+    const current = batch.filter((hotspot) => inDateRange(hotspot, filters));
+    if (current.length > 0) {
+      setLiveItems((previous) => mergeHotspots(previous, current).items);
+    }
+  });
+
+  const merged = useMemo(() => mergeHotspots(results?.items ?? [], liveItems), [results, liveItems]);
+  const hotspots = results ? merged.items : [];
+  const truncated = Boolean(results?.truncated) || merged.trimmed;
+  const liveCount = hotspots.filter((hotspot) => hotspot.id === null).length;
+  const selected = hotspots.find((hotspot) => hotspot.event_id === selectedId);
   const areaBounds = filters.region ? regions[filters.region].bounds : null;
   const timelineValue = weatherAt || weatherForecast?.valid_at || "";
   const timelineIndex = Math.max(0, weatherForecast?.times.indexOf(timelineValue) ?? 0);
@@ -135,7 +156,7 @@ function App() {
       return;
     }
     setFormError("");
-    setFilters({ ...draft });
+    setFilters({ ...draft, openEnded: draft.dateTo >= todayUtc() });
   }
 
   return (
@@ -194,7 +215,9 @@ function App() {
           <div className="map-summary">
             <span>Detections <strong>{loading || !results ? "—" : hotspots.length.toLocaleString()}</strong></span>
             <span>Latest <strong>{hotspots[0] ? formatUtc(hotspots[0].observed_at) : "—"}</strong></span>
-            {results?.truncated && <span className="limit-label">Result limit reached</span>}
+            {liveCount > 0 && <span>New since load <strong>{liveCount.toLocaleString()}</strong></span>}
+            {truncated && <span className="limit-label">Result limit reached</span>}
+            <span className="live-status" data-status={liveStatus} role="status" title="New detections appear on the map as they arrive in the pipeline"><i aria-hidden="true" />{liveLabels[liveStatus]}</span>
           </div>
           {weatherMetric && weatherForecast && (
             <div className="weather-timeline">
@@ -218,7 +241,7 @@ function App() {
           {loading && <div className="map-message" role="status">Loading observations…</div>}
           {error && <div className="map-message map-error" role="alert">Could not load observations: {error}. Check the API and try again.</div>}
           {!loading && !error && hotspots.length === 0 && <div className="map-message" role="status">No detections for these filters. Try a wider area or date range.</div>}
-          {results?.truncated && <div className="notice" role="status">Showing the most recent 5,000 detections. Narrow your filters to see the rest.</div>}
+          {truncated && <div className="notice" role="status">Showing the most recent 5,000 detections. Narrow your filters to see the rest.</div>}
           <div className="map-wrap">
             <MapView
               hotspots={hotspots}
@@ -268,7 +291,7 @@ function App() {
             </section>
             <section className="recent">
               <div className="panel-heading"><h2>Recent detections</h2><span>{hotspots.length.toLocaleString()}</span></div>
-              {hotspots.length > 0 ? <div className="recent-list">{hotspots.slice(0, 8).map((hotspot) => <button key={hotspot.id} type="button" className="recent-item" aria-pressed={hotspot.id === selectedId} onClick={() => setSelectedId(hotspot.id)}><i aria-hidden="true" /><span><strong>{hotspot.latitude.toFixed(3)}°, {hotspot.longitude.toFixed(3)}°</strong><small>{formatUtc(hotspot.observed_at)}</small></span></button>)}</div> : <p className="recent-empty">{loading ? "Loading observations…" : error ? "Observations unavailable." : "No observations to show."}</p>}
+              {hotspots.length > 0 ? <div className="recent-list">{hotspots.slice(0, 8).map((hotspot) => <button key={hotspot.event_id} type="button" className="recent-item" aria-pressed={hotspot.event_id === selectedId} onClick={() => setSelectedId(hotspot.event_id)}><i aria-hidden="true" /><span><strong>{hotspot.latitude.toFixed(3)}°, {hotspot.longitude.toFixed(3)}°</strong><small>{formatUtc(hotspot.observed_at)}</small></span></button>)}</div> : <p className="recent-empty">{loading ? "Loading observations…" : error ? "Observations unavailable." : "No observations to show."}</p>}
               {hotspots.length > 8 && <p className="recent-foot">Showing 8 most recent observations</p>}
             </section>
           </div>
@@ -290,7 +313,7 @@ function DetectionDetails({ hotspot }: { hotspot: Hotspot }) {
     ["Fire radiative power", frp !== null ? `${frp} MW` : "Not provided"],
     ["Day / night", hotspot.attributes.daynight === "D" ? "Day" : hotspot.attributes.daynight === "N" ? "Night" : "Not provided"],
   ];
-  return <div className="detail-content"><div className="detail-type">Satellite detection <span>#{hotspot.id}</span></div><dl>{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>Pixel center detected by NASA FIRMS, not a confirmed fire perimeter.</p></div>;
+  return <div className="detail-content"><div className="detail-type">Satellite detection <span>{hotspot.id === null ? "Live" : `#${hotspot.id}`}</span></div><dl>{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>Pixel center detected by NASA FIRMS, not a confirmed fire perimeter.</p></div>;
 }
 
 export default App;

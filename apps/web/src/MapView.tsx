@@ -22,8 +22,8 @@ interface MapViewProps {
   weatherMetric: WeatherMetric;
   bounds: Bounds;
   areaBounds: Bounds | null;
-  selectedId: number | null;
-  onSelect: (id: number) => void;
+  selectedId: string | null;
+  onSelect: (eventId: string) => void;
 }
 
 export default function MapView({
@@ -69,7 +69,7 @@ export default function MapView({
         layerFilter: (layer) => layer === hotspotLayer,
       });
       const id = feature?.getId();
-      if (typeof id === "number") selectRef.current(id);
+      if (typeof id === "string") selectRef.current(id);
     });
     mapRef.current = map;
     return () => {
@@ -125,8 +125,8 @@ export default function MapView({
         const feature = new Feature({
           geometry: new Point(fromLonLat([hotspot.longitude, hotspot.latitude])),
         });
-        feature.setId(hotspot.id);
-        feature.setStyle(frpStyles(hotspot.attributes.frp, hotspot.id === selectedId));
+        feature.setId(hotspot.event_id);
+        feature.setStyle(frpStyles(hotspot.attributes.frp, hotspot.event_id === selectedId));
         return feature;
       }),
     );

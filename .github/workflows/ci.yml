@@ -36,8 +36,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: apps/api/pyproject.toml
-      - run: pip install -e '.[dev]'
+          cache-dependency-path: |
+            apps/api/pyproject.toml
+            packages/events/pyproject.toml
+      - run: pip install -e ../../packages/events -e '.[dev]'
       - run: ruff check .
       - name: Start PostGIS
         working-directory: .
@@ -109,7 +111,9 @@ jobs:
         run: |
           docker build -f services/ingestor/Containerfile -t wildfire-ingestor .
           docker build -f services/sink-worker/Containerfile -t wildfire-sink-worker .
+          docker build -f apps/api/Containerfile -t wildfire-api .
       - name: Smoke-test service images
         run: |
           docker run --rm wildfire-ingestor python -c "from wildfire_ingestor.countries import selected_countries; assert selected_countries().covers([(13.756, 100.502)]) == [True]"
           docker run --rm wildfire-sink-worker python -c "import wildfire_sink.service"
+          docker run --rm wildfire-api python -c "import wildfire_api.main"
