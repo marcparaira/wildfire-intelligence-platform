@@ -23,6 +23,11 @@ studies. System architecture is documented separately.
 | Backend | Python, FastAPI | Selected |
 | Backend Container Runtime | Python on Alpine Linux | Selected |
 | Event Streaming | Apache Kafka | Selected |
+| Stream Processing | Quix Streams (Python) | Proposed |
+| Schema Registry | Apicurio Registry or Karapace | Proposed |
+| Kafka Archiving | Python archiver in the sink worker | Proposed |
+| Spatial Indexing | H3 | Proposed |
+| Browser Push | Server-Sent Events | Proposed |
 | Database | PostgreSQL, PostGIS | Selected |
 | Cloud Provider | Amazon Web Services (AWS) | Selected |
 | Infrastructure as Code | AWS CDK (TypeScript) | Selected |
