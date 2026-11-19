@@ -23,10 +23,10 @@
 
 ## Phase 3 — First Functional Dashboard
 
-- Build React dashboard with OpenLayers.
-- Expose hotspot queries via FastAPI.
-- Display hotspots on a map with geographic and date filters.
-- Show details for selected detections.
+- [x] Build React dashboard with OpenLayers.
+- [x] Expose hotspot queries via FastAPI.
+- [x] Display hotspots on a map with geographic and date filters.
+- [x] Show details for selected detections.
 
 **Deliverable:** Working wildfire hotspot dashboard.
 

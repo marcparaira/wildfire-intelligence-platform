@@ -39,7 +39,24 @@ jobs:
           cache-dependency-path: apps/api/pyproject.toml
       - run: pip install -e '.[dev]'
       - run: ruff check .
-      - run: pytest
+      - name: Start PostGIS
+        working-directory: .
+        run: docker compose up -d db
+      - name: Wait for PostGIS
+        working-directory: .
+        run: |
+          for attempt in $(seq 1 60); do
+            if docker compose exec -T db psql -U wildfire -d wildfire -c 'SELECT PostGIS_Full_Version()' >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs db
+          exit 1
+      - name: Test API
+        env:
+          API_TEST_DATABASE_URL: postgresql://wildfire:wildfire_dev@localhost:55432/wildfire
+        run: pytest
 
   firms-pipeline:
     runs-on: ubuntu-latest

@@ -41,6 +41,26 @@ local database and Kafka volumes with `podman compose down -v`.
 The local database uses development-only credentials from `compose.yaml`.
 Do not use these defaults outside a local development environment.
 
+## Hotspot dashboard
+
+The dashboard displays detections already ingested into PostGIS. Select an area
+and an inclusive UTC date range, then select **Apply filters**. Choose a map
+point or a recent observation to see its acquisition time, source, confidence,
+and other attributes. Use **Filters** and **Observations** in the header to
+collapse or reopen the side panels; selecting a map point reopens observation
+details. **Refresh data** re-queries the database; it does not run FIRMS
+ingestion. The map uses OpenStreetMap tiles and needs internet access for its
+basemap.
+
+The [hotspot API](http://localhost:8000/docs#/hotspots) accepts optional
+`west`, `south`, `east`, and `north` bounding-box coordinates (all four
+required together), and `date_from` / `date_to` in `YYYY-MM-DD` UTC.
+`GET /hotspots` returns `items` in newest-first order and a `truncated` flag.
+The default limit is 5,000 (maximum 10,000); narrow the filters if the
+dashboard reports that the limit was reached. Geographic boxes do not cross
+the antimeridian. The processor must have created the detections table before
+hotspot queries can succeed.
+
 ## Run checks locally
 
 ```sh
@@ -63,6 +83,15 @@ python -m venv .venv
 pip install -e '.[dev]'
 ruff check .
 pytest
+```
+
+API integration tests run when `API_TEST_DATABASE_URL` points to a PostGIS
+database, and create and remove an isolated test schema. For the default local
+database, run from the project root with the API virtual environment active:
+
+```sh
+API_TEST_DATABASE_URL=postgresql://wildfire:wildfire_dev@localhost:55432/wildfire \
+  pytest apps/api/tests
 ```
 
 From the repository root, the pipeline integration test is skipped unless both
@@ -141,8 +170,7 @@ processor without committing that offset. Inspect its logs and repair the
 problem before restarting it; an invalid Kafka event requires operator
 intervention because published records cannot be edited in place. Kafka and
 PostGIS data persist across ordinary Compose restarts, subject to Kafka's
-retention policy, but `down -v` deletes both. No API endpoint or map is included
-yet.
+retention policy, but `down -v` deletes both.
 
 ## Local service endpoints
 
@@ -152,5 +180,6 @@ yet.
 | API / OpenAPI docs | <http://localhost:8000/docs> |
 | API health | <http://localhost:8000/health> |
 | API health through the web proxy | <http://localhost:8080/api/health> |
+| Hotspot API through the web proxy | <http://localhost:8080/api/hotspots> |
 | PostgreSQL/PostGIS | `localhost:55432` |
 | Kafka | `localhost:19092` |
