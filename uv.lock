@@ -1526,27 +1526,9 @@ source = { editable = "packages/events" }
 dependencies = [
     { name = "h3" },
     { name = "kafka-python" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "h3", specifier = ">=4.2,<5" },
-    { name = "kafka-python", specifier = ">=2.2,<3" },
-    { name = "pydantic", specifier = ">=2.10,<3" },
-]
-
-[[package]]
-name = "wildfire-ingestor"
-version = "0.2.0"
-source = { editable = "services/ingestor" }
-dependencies = [
-    { name = "h3" },
-    { name = "kafka-python" },
     { name = "numpy" },
     { name = "pydantic" },
     { name = "shapely" },
-    { name = "wildfire-events" },
 ]
 
 [package.metadata]
@@ -1556,6 +1538,24 @@ requires-dist = [
     { name = "numpy", specifier = ">=2,<3" },
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "shapely", specifier = ">=2.0,<3" },
+]
+
+[[package]]
+name = "wildfire-ingestor"
+version = "0.2.0"
+source = { editable = "services/ingestor" }
+dependencies = [
+    { name = "h3" },
+    { name = "kafka-python" },
+    { name = "pydantic" },
+    { name = "wildfire-events" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "h3", specifier = ">=4.2,<5" },
+    { name = "kafka-python", specifier = ">=2.2,<3" },
+    { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "wildfire-events", editable = "packages/events" },
 ]
 
