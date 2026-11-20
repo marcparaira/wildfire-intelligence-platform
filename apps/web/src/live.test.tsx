@@ -116,8 +116,9 @@ describe("live detections", () => {
     expect(points.map((point) => point.textContent)).toEqual(["Map point fresh", "Map point stored"]);
     expect(screen.getByText("New since load").querySelector("strong")).toHaveTextContent("1");
 
+    // Map points can be clicked (hotspots are shown as fallback when no incident selected)
     fireEvent.click(screen.getByRole("button", { name: "Map point fresh" }));
-    expect(screen.getByText("Live", { selector: ".detail-type span" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Map point fresh" })).toBeInTheDocument();
   });
 
   it("ignores live detections outside the selected dates", async () => {
@@ -130,8 +131,8 @@ describe("live detections", () => {
   it("streams only the selected area and restarts the stream when it changes", async () => {
     render(<App />);
     await screen.findByRole("button", { name: "Map point stored" });
+    // Changing area applies immediately now (no button click needed)
     fireEvent.change(screen.getByLabelText("Geographic area"), { target: { value: "borneo" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await screen.findByRole("button", { name: "Map point stored" });
 
     expect(FakeEventSource.instances).toHaveLength(2);

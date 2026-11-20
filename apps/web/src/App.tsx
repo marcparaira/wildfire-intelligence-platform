@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
 import MapView from "./MapView";
-import { countryName, formatNumber, formatRisk, formatWind } from "./conditions";
-import { IncidentDetails, IncidentPanel } from "./IncidentPanel";
-import { incidentStatuses, useIncidentDetail, useIncidents } from "./incidents";
+import type { EnrichmentLayer } from "./enrichmentLayers";
+import { EnrichmentLayers } from "./EnrichmentLayers";
+import { useIncidentDetail, useIncidents, type IncidentStatus } from "./incidents";
+import { IncidentDetails } from "./IncidentPanel";
+import { incidentStatuses } from "./incidents";
 import type { IncidentSummary } from "./incidents";
-import { FRP_HIGH_COLOR, FRP_LOW_COLOR, FRP_UNAVAILABLE_COLOR, frpPosition, parseFrp } from "./frp";
+import { FRP_HIGH_COLOR, FRP_LOW_COLOR, FRP_UNAVAILABLE_COLOR, frpPosition } from "./frp";
 import { DEFAULT_VIEW_BOUNDS, formatUtc, inDateRange, isRegionId, mergeHotspots, regions, todayUtc } from "./hotspots";
 import type { Bounds, DateRange, Hotspot, HotspotResults, RegionId } from "./hotspots";
 import { useLiveDetections } from "./live";
 import { usePipelineStatus } from "./pipeline";
-import { PipelineStatusPage, SourceFreshness } from "./PipelineStatus";
+import { PipelineStatusPage } from "./PipelineStatus";
 import type { LiveStatus } from "./live";
 import { formatWeatherTime, isWeatherMetric, weatherLegend, weatherMetrics } from "./weather";
 import type { WeatherForecast, WeatherMetric } from "./weather";
@@ -73,7 +74,7 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [incidentFocus, setIncidentFocus] = useState<Bounds | null>(null);
-  const [showIncidents, setShowIncidents] = useState(true);
+  const [incidentStatusFilter, setIncidentStatusFilter] = useState<Set<IncidentStatus>>(new Set(["new", "growing", "stable"]));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
@@ -85,6 +86,7 @@ function App() {
   const [weatherAt, setWeatherAt] = useState("");
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState("");
+  const [enrichmentLayers, setEnrichmentLayers] = useState<Set<EnrichmentLayer>>(new Set());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -162,7 +164,11 @@ function App() {
 
   const liveQuery = useMemo(() => regionQuery(filters.region).toString(), [filters.region]);
   const incidents = useIncidents(liveQuery, refresh);
-  const selectedIncident = incidents.items.find((incident) => incident.incident_id === selectedIncidentId) ?? null;
+  const filteredIncidents = useMemo(
+    () => incidents.items.filter((incident) => incidentStatusFilter.has(incident.status)),
+    [incidents.items, incidentStatusFilter]
+  );
+  const selectedIncident = filteredIncidents.find((incident) => incident.incident_id === selectedIncidentId) ?? null;
   const incidentDetail = useIncidentDetail(selectedIncidentId, selectedIncident?.revision ?? null);
   const liveStatus = useLiveDetections(liveQuery, (batch) => {
     const current = batch.filter((hotspot) => inDateRange(hotspot, filters));
@@ -175,7 +181,6 @@ function App() {
   const hotspots = results ? merged.items : [];
   const truncated = Boolean(results?.truncated) || merged.trimmed;
   const liveCount = hotspots.filter((hotspot) => hotspot.id === null).length;
-  const selected = hotspots.find((hotspot) => hotspot.event_id === selectedId);
   const areaBounds = filters.region ? regions[filters.region].bounds : null;
   const timelineValue = weatherAt || weatherForecast?.valid_at || "";
   const timelineIndex = Math.max(0, weatherForecast?.times.indexOf(timelineValue) ?? 0);
@@ -194,14 +199,27 @@ function App() {
     if (focus) setIncidentFocus(focus.bbox);
   }
 
-  function applyFilters(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!draft.dateFrom || !draft.dateTo || draft.dateFrom > draft.dateTo) {
+  function applyAreaFilter(region: RegionId | "") {
+    setDraft({ ...draft, region });
+    // Validate date range before applying
+    if (draft.dateFrom && draft.dateTo && draft.dateFrom <= draft.dateTo) {
+      setFormError("");
+      setFilters({ ...draft, region, openEnded: draft.dateTo >= todayUtc() });
+    } else if (draft.dateFrom && draft.dateTo) {
       setFormError("Choose a valid date range. Start must be on or before end.");
-      return;
     }
-    setFormError("");
-    setFilters({ ...draft, openEnded: draft.dateTo >= todayUtc() });
+  }
+
+  function applyDateFilter(dateFrom: string, dateTo: string) {
+    const newDraft = { ...draft, dateFrom, dateTo };
+    setDraft(newDraft);
+    // Validate and apply date range
+    if (dateFrom && dateTo && dateFrom <= dateTo) {
+      setFormError("");
+      setFilters({ ...newDraft, openEnded: dateTo >= todayUtc() });
+    } else if (dateFrom && dateTo) {
+      setFormError("Choose a valid date range. Start must be on or before end.");
+    }
   }
 
   return (
@@ -223,12 +241,12 @@ function App() {
               <svg aria-hidden="true" viewBox="0 0 16 16"><polyline points={filtersOpen ? "10.5 3 5.5 8 10.5 13" : "5.5 3 10.5 8 5.5 13"} /></svg>
             </button>
           </div>
-          <form id="filter-panel" onSubmit={applyFilters} className="filters" hidden={!filtersOpen}>
+          <form id="filter-panel" className="filters" hidden={!filtersOpen}>
             <label htmlFor="region">Geographic area</label>
             <select id="region" value={draft.region} onChange={(event) => {
               const value = event.target.value;
               if (value === "" || isRegionId(value)) {
-                setDraft({ ...draft, region: value });
+                applyAreaFilter(value);
               } else {
                 setFormError("Choose a valid geographic area.");
               }
@@ -239,25 +257,43 @@ function App() {
             <p className="field-note">Areas use approximate, overlapping bounding boxes, not administrative boundaries.</p>
             <div className="date-label">Observation dates <span>UTC</span></div>
             <div className="date-fields">
-              <div><label htmlFor="date-from">From</label><input id="date-from" type="date" value={draft.dateFrom} onChange={(event) => setDraft({ ...draft, dateFrom: event.target.value })} /></div>
-              <div><label htmlFor="date-to">To</label><input id="date-to" type="date" value={draft.dateTo} onChange={(event) => setDraft({ ...draft, dateTo: event.target.value })} /></div>
+              <div><label htmlFor="date-from">From</label><input id="date-from" type="date" value={draft.dateFrom} onChange={(event) => applyDateFilter(event.target.value, draft.dateTo)} /></div>
+              <div><label htmlFor="date-to">To</label><input id="date-to" type="date" value={draft.dateTo} onChange={(event) => applyDateFilter(draft.dateFrom, event.target.value)} /></div>
             </div>
             {formError && <p className="form-error" role="alert">{formError}</p>}
-            <button type="submit" className="apply-button">Apply filters</button>
           </form>
           <div hidden={!filtersOpen}>
-            <IncidentPanel
-              items={incidents.items}
-              truncated={incidents.truncated}
-              loading={incidents.loading}
-              error={incidents.error}
-              selectedId={selectedIncidentId}
-              showOnMap={showIncidents}
-              onShowOnMapChange={setShowIncidents}
-              onSelect={(incident) => selectIncident(incident.incident_id, incident)}
-            />
+            <fieldset>
+              <legend>Incident Status</legend>
+              <div className="filter-buttons">
+                {(["new", "growing", "stable"] as const).map((status) => (
+                  <button
+                    key={status}
+                    className={`status-button ${incidentStatusFilter.has(status) ? "active" : ""}`}
+                    onClick={() => {
+                      const newFilter = new Set(incidentStatusFilter);
+                      if (newFilter.has(status)) {
+                        newFilter.delete(status);
+                      } else {
+                        newFilter.add(status);
+                      }
+                      setIncidentStatusFilter(newFilter);
+                    }}
+                    style={{
+                      backgroundColor: incidentStatusFilter.has(status) ? incidentStatuses[status].color : "transparent",
+                      color: incidentStatusFilter.has(status) ? "white" : "inherit",
+                      border: `2px solid ${incidentStatuses[status].color}`,
+                    }}
+                  >
+                    {incidentStatuses[status].label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
           </div>
-          <div hidden={!filtersOpen}><SourceFreshness state={pipeline} /></div>
+          <div hidden={!filtersOpen}>
+            <EnrichmentLayers shown={enrichmentLayers} onChange={setEnrichmentLayers} />
+          </div>
         </aside>
 
         <section className="content" aria-label="Hotspot dashboard">
@@ -313,9 +349,12 @@ function App() {
               areaBounds={areaBounds}
               selectedId={selectedId}
               onSelect={selectHotspot}
-              incidents={showIncidents ? incidents.items : []}
+              incidents={filteredIncidents}
               selectedIncidentId={selectedIncidentId}
-              onSelectIncident={(id) => selectIncident(id)}
+              onSelectIncident={(id) => {
+                const incident = filteredIncidents.find((inc) => inc.incident_id === id);
+                selectIncident(id, incident ?? null);
+              }}
               focusBounds={incidentFocus}
             />
           </div>
@@ -338,7 +377,7 @@ function App() {
               <span>{activeWeatherLegend.label}</span>
               {weatherMetric === "wind" && <span>Arrows show downwind direction</span>}
             </div>}
-            {showIncidents && incidents.items.length > 0 && <div className="incident-legend" role="group" aria-label="Incident status legend">
+            {filteredIncidents.length > 0 && <div className="incident-legend" role="group" aria-label="Incident status legend">
               <span>Incidents</span>
               {(["new", "growing", "stable"] as const).map((status) => <span key={status}><i aria-hidden="true" style={{ borderColor: incidentStatuses[status].color }} />{incidentStatuses[status].label}</span>)}
             </div>}
@@ -348,23 +387,16 @@ function App() {
           </div>
         </section>
 
-        <aside className="detail-column" aria-label="Observations" data-collapsed={!observationsOpen}>
-          <div className="panel-heading panel-heading-toggle observation-heading">
-            <button type="button" className="panel-toggle" aria-label={observationsOpen ? "Collapse observations" : "Expand observations"} title={observationsOpen ? "Collapse observations" : "Expand observations"} aria-expanded={observationsOpen} aria-controls="observation-panel" onClick={() => setObservationsOpen((open) => !open)}>
+        <aside className="detail-column" aria-label="Incident details" data-collapsed={!observationsOpen || !selectedIncidentId}>
+          <div className="panel-heading panel-heading-toggle observation-heading" hidden={!selectedIncidentId}>
+            <button type="button" className="panel-toggle" aria-label={observationsOpen ? "Collapse incident details" : "Expand incident details"} title={observationsOpen ? "Collapse incident details" : "Expand incident details"} aria-expanded={observationsOpen} aria-controls="observation-panel" onClick={() => setObservationsOpen((open) => !open)}>
               <svg aria-hidden="true" viewBox="0 0 16 16"><polyline points={observationsOpen ? "5.5 3 10.5 8 5.5 13" : "10.5 3 5.5 8 10.5 13"} /></svg>
             </button>
-            <h2 hidden={!observationsOpen}>{selectedIncidentId ? "Incident details" : "Detection details"}</h2>
+            <h2 hidden={!observationsOpen}>Incident details</h2>
           </div>
-          <div id="observation-panel" hidden={!observationsOpen}>
+          <div id="observation-panel" hidden={!observationsOpen || !selectedIncidentId}>
             <section className="details">
-              {selectedIncidentId
-                ? <IncidentDetails summary={selectedIncident} incident={incidentDetail.incident} loading={incidentDetail.loading} error={incidentDetail.error} />
-                : selected ? <DetectionDetails hotspot={selected} /> : <p className="detail-empty">Select a point or incident on the map, or an observation below.</p>}
-            </section>
-            <section className="recent">
-              <div className="panel-heading"><h2>Recent detections</h2><span>{hotspots.length.toLocaleString()}</span></div>
-              {hotspots.length > 0 ? <div className="recent-list">{hotspots.slice(0, 8).map((hotspot) => <button key={hotspot.event_id} type="button" className="recent-item" aria-pressed={hotspot.event_id === selectedId} onClick={() => selectHotspot(hotspot.event_id)}><i aria-hidden="true" /><span><strong>{hotspot.latitude.toFixed(3)}°, {hotspot.longitude.toFixed(3)}°</strong><small>{formatUtc(hotspot.observed_at)}</small></span></button>)}</div> : <p className="recent-empty">{loading ? "Loading observations…" : error ? "Observations unavailable." : "No observations to show."}</p>}
-              {hotspots.length > 8 && <p className="recent-foot">Showing 8 most recent observations</p>}
+              <IncidentDetails summary={selectedIncident} incident={incidentDetail.incident} loading={incidentDetail.loading} error={incidentDetail.error} />
             </section>
           </div>
         </aside>
@@ -373,47 +405,5 @@ function App() {
   );
 }
 
-function DetectionDetails({ hotspot }: { hotspot: Hotspot }) {
-  const frp = parseFrp(hotspot.attributes.frp);
-  const fields = [
-    ["Observed", formatUtc(hotspot.observed_at)],
-    ["Coordinates", `${hotspot.latitude.toFixed(5)}°, ${hotspot.longitude.toFixed(5)}°`],
-    ["Satellite", hotspot.satellite],
-    ["Instrument", hotspot.instrument],
-    ["Product", hotspot.source],
-    ["Confidence", hotspot.attributes.confidence || "Not provided"],
-    ["Fire radiative power", frp !== null ? `${frp} MW` : "Not provided"],
-    ["Day / night", hotspot.attributes.daynight === "D" ? "Day" : hotspot.attributes.daynight === "N" ? "Night" : "Not provided"],
-  ];
-  if (hotspot.country !== undefined && hotspot.country !== null) fields.push(["Country", countryName(hotspot.country)]);
-  const { risk, weather } = hotspot;
-  const conditions: [string, string][] = [];
-  if (risk) {
-    conditions.push(
-      ["Fire risk", formatRisk(risk)],
-      ["Risk points", `Wind ${risk.wind_points} · Heat ${risk.temperature_points} · Dryness ${risk.dryness_points} · Intensity ${risk.intensity_points}`],
-    );
-  }
-  if (weather) {
-    conditions.push(
-      ["Forecast hour", formatUtc(weather.valid_at)],
-      ["Temperature", formatNumber(weather.temperature_c, "°C")],
-      ["Wind", formatWind(weather.wind_speed_kmh, weather.wind_direction_degrees)],
-      ["Rain, past 24 h", weather.precipitation_24h_mm === null ? "Incomplete" : formatNumber(weather.precipitation_24h_mm, "mm")],
-    );
-  }
-  const pending = hotspot.id === null || hotspot.risk === undefined;
-  return (
-    <div className="detail-content">
-      <div className="detail-type">Satellite detection <span>{hotspot.id === null ? "Live" : `#${hotspot.id}`}</span></div>
-      <dl>{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-      <h3>Conditions at observation</h3>
-      {conditions.length > 0
-        ? <dl aria-label="Conditions at observation">{conditions.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-        : <p className="detail-note">{pending ? "Weather and fire risk appear once the detection has been processed; refresh to load them." : "No forecast covered this observation, so weather and fire risk are unavailable."}</p>}
-      <p>Pixel center detected by NASA FIRMS, not a confirmed fire perimeter. Fire risk is a simple screening score from weather and fire intensity, not an official danger rating.</p>
-    </div>
-  );
-}
 
 export default App;

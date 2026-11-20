@@ -12,3 +12,5 @@
 - An incident's peak risk is matched by bounding box, because detections are not linked to incidents.
 - Live detections show no country, weather, or risk until the list is refreshed.
 - Hourly statistics count cross-sensor observations of the same fire separately, and drop detections more than 3 days late.
+- **Frontend map zoom:** When clicking an incident on the map, the view briefly zooms out before zooming to the incident center. This is a known UI/UX issue being tracked.
+- **Growth over time chart:** The chart displays all available daily data for each incident since it was first detected. Historical data is retained in the database across `podman compose` restarts (via the `postgres-data` volume), but test/development datasets may only contain recent fires.

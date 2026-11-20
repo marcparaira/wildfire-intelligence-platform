@@ -110,21 +110,24 @@ export default function MapView({
           ],
         }),
         incidentLayer,
-        hotspotLayer,
+        hotspotLayer, // Only visible when incident is selected
       ],
       view: new View({ center: fromLonLat([114, 1.5]), zoom: 5 }),
     });
     map.on("singleclick", (event) => {
-      const feature = map.forEachFeatureAtPixel(event.pixel, (item) => item, {
-        hitTolerance: 6,
-        layerFilter: (layer) => layer === hotspotLayer,
-      });
-      const id = feature?.getId();
-      if (typeof id === "string") {
-        selectRef.current(id);
-        return;
+      // Only check for hotspots if an incident is selected
+      if (selectedIncidentId) {
+        const feature = map.forEachFeatureAtPixel(event.pixel, (item) => item, {
+          hitTolerance: 6,
+          layerFilter: (layer) => layer === hotspotLayer,
+        });
+        const id = feature?.getId();
+        if (typeof id === "string") {
+          selectRef.current(id);
+          return;
+        }
       }
-      // Detections take precedence: an incident marker sits on top of its own detections.
+      // Check for incidents
       const incident = map.forEachFeatureAtPixel(event.pixel, (item) => item, {
         hitTolerance: 2,
         layerFilter: (layer) => layer === incidentLayer,
@@ -137,7 +140,7 @@ export default function MapView({
       map.setTarget(undefined);
       mapRef.current = null;
     };
-  }, []);
+  }, [selectedIncidentId]);
 
   useEffect(() => {
     const source = weatherSourceRef.current;
@@ -181,8 +184,24 @@ export default function MapView({
   useEffect(() => {
     const source = sourceRef.current;
     source.clear();
+    // Only show hotspots when an incident is selected
+    if (!selectedIncidentId) return;
+    
+    // Find the selected incident to get its bounding box
+    const selectedIncident = incidents.find((inc) => inc.incident_id === selectedIncidentId);
+    if (!selectedIncident) return;
+    
+    // Filter hotspots to only those within the incident's bounding box
+    const [west, south, east, north] = selectedIncident.bbox;
+    const incidentHotspots = hotspots.filter((hotspot) =>
+      hotspot.longitude >= west &&
+      hotspot.longitude <= east &&
+      hotspot.latitude >= south &&
+      hotspot.latitude <= north,
+    );
+    
     source.addFeatures(
-      hotspots.map((hotspot) => {
+      incidentHotspots.map((hotspot) => {
         const feature = new Feature({
           geometry: new Point(fromLonLat([hotspot.longitude, hotspot.latitude])),
         });
@@ -191,7 +210,7 @@ export default function MapView({
         return feature;
       }),
     );
-  }, [hotspots, selectedId]);
+  }, [hotspots, selectedId, selectedIncidentId, incidents]);
 
   useEffect(() => {
     const source = incidentSourceRef.current;
@@ -234,11 +253,20 @@ export default function MapView({
 
   const focusKey = focusBounds?.join(",") ?? "";
   useEffect(() => {
-    if (!focusKey) return;
-    const extent = focusKey.split(",").map(Number) as Bounds;
-    mapRef.current?.getView().fit(transformExtent(extent, "EPSG:4326", "EPSG:3857"), {
-      padding: [60, 60, 60, 60],
-      maxZoom: 11,
+    if (!focusKey || !mapRef.current) return;
+    const targetExtent = focusKey.split(",").map(Number) as Bounds;
+    const targetExtentProj = transformExtent(targetExtent, "EPSG:4326", "EPSG:3857");
+    
+    // Calculate center point instead of fitting entire extent
+    const centerX = (targetExtentProj[0] + targetExtentProj[2]) / 2;
+    const centerY = (targetExtentProj[1] + targetExtentProj[3]) / 2;
+    
+    const view = mapRef.current.getView();
+    
+    // Animate to center at zoom level 10 for smooth transitions
+    view.animate({
+      center: [centerX, centerY],
+      zoom: 10,
       duration: 300,
     });
   }, [focusKey]);

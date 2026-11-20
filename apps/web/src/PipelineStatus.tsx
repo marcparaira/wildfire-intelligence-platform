@@ -63,6 +63,8 @@ export function PipelineStatusPage({ state }: { state: PipelineState }) {
 
       {status && (
         <div className="status-sections">
+          <SourceFreshness state={state} />
+          
           <section>
             <h3>Sources</h3>
             <p className="status-note">Freshness is the age of the newest observation, or of the newest forecast retrieval. Ingested counts use the time the ingestor fetched each record.</p>

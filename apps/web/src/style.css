@@ -323,6 +323,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 .freshness-badge[data-freshness="stale"] i { background: #c2410c; box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.2); }
 .freshness .freshness-badge { min-width: 62px; }
 
+.enrichment-layers { border-top: 1px solid #d7ddda; }
+.enrichment-layers .panel-heading { border-top: 0; }
+.layer-toggles { padding: 4px 12px; display: flex; flex-direction: column; gap: 2px; }
+
 .status-main { flex: 1 1 auto; min-height: 0; overflow-y: auto; background: #fff; }
 .status-header {
   display: flex;
@@ -352,6 +356,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 .group-state[data-state="Stable"] { color: #23663f; font-weight: 600; }
 .group-state[data-state="Empty"], .group-state[data-state="Dead"] { color: #8b301d; font-weight: 600; }
 .partition-list { display: inline-flex; gap: 10px; color: #46564d; }
+
+fieldset { margin: 12px 0 0; padding: 12px; border: 1px solid #d7ddda; border-radius: 2px; background: #f8f9f8; }
+fieldset legend { padding: 0 8px; margin: -17px 0 0 -8px; font-size: 12px; font-weight: 600; color: #52605a; }
+.filter-buttons { display: flex; gap: 8px; }
+.status-button {
+  flex: 1;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 2px;
+  font-weight: 600;
+  font-size: 12px;
+  transition: all 150ms ease;
+}
+.status-button:hover { opacity: 0.8; }
 
 @media (max-width: 1050px) {
   .header-source { display: none; }

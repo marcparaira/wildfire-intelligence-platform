@@ -190,19 +190,35 @@ when `compose.yaml` changes: run `podman compose down` (without `-v`), then
 
 ## Dashboard
 
-- **Hotspots** come from FIRMS VIIRS (SNPP, NOAA-20, NOAA-21) and MODIS
-  near-real-time products. Filter by area and UTC date range; select a point
-  for its details.
+- **Incidents** are groups of spatially and temporally related detections. Click an incident bubble on the map to view:
+  - Incident status (new, growing, stable, inactive)
+  - Detection count and footprint size
+  - Growth over time (daily breakdown since the incident started)
+  - Weather context from the latest forecast
+  
+  Filter incidents by status using the **Incident Status** buttons in the left sidebar (new, growing, stable).
+
+- **Hotspots** from NASA FIRMS (VIIRS SNPP, NOAA-20, NOAA-21, and MODIS) appear only when you select an incident. Each hotspot shows:
+  - Radiative power (FRP) on a log scale
+  - Acquisition time and satellite source
+  - Country, weather conditions, and fire risk
+  
+  Select a hotspot for detailed information.
+
 - **Live updates:** new detections appear as soon as they are published; the
   indicator above the map shows the connection state. See
   [known limitations](docs/limitations.md).
+  
 - **Weather layer:** temperature, precipitation, or wind from Open-Meteo's
   seven-day hourly forecast, on a grid of resolution-2 H3 cells (about
   87,000 km² each). Use the timeline to change the forecast hour.
+  
 - **Refresh data** re-queries the database; it does not trigger ingestion.
+
 - **Data freshness** in the filter panel shows each source's newest
   observation (or forecast retrieval) and whether it is fresh, delayed, or
   stale.
+  
 - **Pipeline status** (<http://localhost:8080/#/status>) adds per-source
   ingest counts, topic throughput, sink-worker consumer lag, and recent dead
   letters. See [pipeline monitoring](docs/operations/event-pipeline.md#pipeline-status).
@@ -212,6 +228,8 @@ Marker size and color show fire radiative power (FRP) on a log scale capped at
 satellite pixel centers, not fire perimeters. The weather overlay is coarse and
 does not predict fire behavior. Basemap tiles come from OpenStreetMap and need
 internet access.
+
+![Incident details with growth over time](docs/architecture/incident-details-view.png)
 
 ## Ingestion
 
@@ -243,6 +261,8 @@ permanent, so use a disposable environment):
 podman compose exec -T ingestor python -m wildfire_ingestor.firms \
   --product VIIRS_NOAA20_NRT --csv - < services/ingestor/tests/fixtures/viirs_noaa20.csv
 ```
+
+**To populate historical data:** See [Ingesting Historical Fire Data](docs/ingest-historical-data.md) to fetch up to 5 days of past data for testing and visualization.
 
 ## Fire incidents
 
