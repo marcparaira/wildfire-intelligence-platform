@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import psycopg
@@ -11,7 +11,7 @@ from psycopg.conninfo import make_conninfo
 from pydantic import BaseModel
 
 from wildfire_api.main import app
-from wildfire_api.weather import WeatherForecast
+from wildfire_api.weather import ForecastTimeUnavailable, WeatherForecast, select_forecast_time
 
 client: httpx.Client = TestClient(app)
 
@@ -37,6 +37,22 @@ def forecast(params: dict[str, str | int]) -> WeatherForecast:
 )
 def test_invalid_weather_filters_are_rejected(query: str) -> None:
     assert client.get(f"/weather/forecast{query}").status_code == 422
+
+
+HOURS = [datetime(2026, 3, 5, hour, tzinfo=UTC) for hour in (0, 1, 2)]
+
+
+def test_default_forecast_time_is_the_first_hour_not_in_the_past() -> None:
+    assert select_forecast_time(HOURS, None, HOURS[0] + timedelta(minutes=1)) == HOURS[1]
+    assert select_forecast_time(HOURS, None, HOURS[1]) == HOURS[1]
+    # After the last forecast hour, the last one is still the best available.
+    assert select_forecast_time(HOURS, None, HOURS[2] + timedelta(days=1)) == HOURS[2]
+
+
+def test_requested_forecast_time_must_be_stored() -> None:
+    assert select_forecast_time(HOURS, HOURS[2], HOURS[0]) == HOURS[2]
+    with pytest.raises(ForecastTimeUnavailable):
+        _ = select_forecast_time(HOURS, HOURS[0] + timedelta(minutes=30), HOURS[0])
 
 
 def test_weather_is_read_only() -> None:
@@ -100,9 +116,7 @@ def test_weather_forecasts_are_read_from_the_projection(monkeypatch: pytest.Monk
             assert result.oldest_generated_at.hour == 18
 
             assert len(forecast({"at": first.isoformat()}).items) == 2
-            missing = client.get(
-                "/weather/forecast", params={"at": "2026-03-06T00:00:00+00:00"}
-            )
+            missing = client.get("/weather/forecast", params={"at": "2026-03-06T00:00:00+00:00"})
             assert missing.status_code == 422
 
             _ = db.execute("TRUNCATE weather_hourly")

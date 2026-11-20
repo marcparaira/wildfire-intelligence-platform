@@ -1,0 +1,310 @@
+{
+  "$defs": {
+    "FireRisk": {
+      "additionalProperties": false,
+      "description": "Points-based fire risk indicator; each factor scores 0-3, the total 0-12.\n\nThe rules are documented in docs/operations/event-pipeline.md. It is a simple\nscreening heuristic, not a calibrated fire danger rating.",
+      "properties": {
+        "dryness_points": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Dryness Points",
+          "type": "integer"
+        },
+        "intensity_points": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Intensity Points",
+          "type": "integer"
+        },
+        "level": {
+          "enum": [
+            "low",
+            "moderate",
+            "high",
+            "extreme"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "score": {
+          "maximum": 12,
+          "minimum": 0,
+          "title": "Score",
+          "type": "integer"
+        },
+        "temperature_points": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Temperature Points",
+          "type": "integer"
+        },
+        "wind_points": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Wind Points",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "score",
+        "level",
+        "wind_points",
+        "temperature_points",
+        "dryness_points",
+        "intensity_points"
+      ],
+      "title": "FireRisk",
+      "type": "object"
+    },
+    "FirmsDetection": {
+      "additionalProperties": false,
+      "description": "One satellite active-fire pixel from a NASA FIRMS NRT product.",
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Provider CSV row, unmodified",
+          "title": "Attributes",
+          "type": "object"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "frp_mw": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fire radiative power in MW",
+          "title": "Frp Mw"
+        },
+        "h3_cell": {
+          "description": "Resolution-2 H3 cell; also the Kafka message key",
+          "title": "H3 Cell",
+          "type": "string"
+        },
+        "ingested_at": {
+          "format": "date-time",
+          "title": "Ingested At",
+          "type": "string"
+        },
+        "instrument": {
+          "enum": [
+            "VIIRS",
+            "MODIS"
+          ],
+          "title": "Instrument",
+          "type": "string"
+        },
+        "latitude": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Latitude",
+          "type": "number"
+        },
+        "longitude": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Longitude",
+          "type": "number"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "product": {
+          "enum": [
+            "VIIRS_SNPP_NRT",
+            "VIIRS_NOAA20_NRT",
+            "VIIRS_NOAA21_NRT",
+            "MODIS_NRT"
+          ],
+          "title": "Product",
+          "type": "string"
+        },
+        "satellite": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Satellite",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "product",
+        "instrument",
+        "satellite",
+        "observed_at",
+        "latitude",
+        "longitude",
+        "h3_cell",
+        "attributes",
+        "ingested_at"
+      ],
+      "title": "FirmsDetection",
+      "type": "object"
+    },
+    "ObservedWeather": {
+      "additionalProperties": false,
+      "description": "Forecast weather for a detection's H3 cell at the hour nearest its observation.",
+      "properties": {
+        "forecast_generated_at": {
+          "description": "Retrieval time of the forecast that supplied this hour",
+          "format": "date-time",
+          "title": "Forecast Generated At",
+          "type": "string"
+        },
+        "precipitation_24h_mm": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Precipitation over the 24 hours ending at valid_at; null if incomplete",
+          "title": "Precipitation 24H Mm"
+        },
+        "precipitation_mm": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Precipitation Mm"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Temperature C"
+        },
+        "valid_at": {
+          "description": "Forecast hour nearest to the observation",
+          "format": "date-time",
+          "title": "Valid At",
+          "type": "string"
+        },
+        "wind_direction_degrees": {
+          "anyOf": [
+            {
+              "maximum": 360,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Wind Direction Degrees"
+        },
+        "wind_speed_kmh": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Wind Speed Kmh"
+        }
+      },
+      "required": [
+        "valid_at",
+        "forecast_generated_at",
+        "temperature_c",
+        "precipitation_mm",
+        "precipitation_24h_mm",
+        "wind_speed_kmh",
+        "wind_direction_degrees"
+      ],
+      "title": "ObservedWeather",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A detection with its country, the weather at observation time, and its fire risk.\n\nKeyed like the source detection (resolution-2 H3 cell), so it is co-partitioned\nwith ``firms.detections`` and ``weather.forecasts``.",
+  "properties": {
+    "country": {
+      "anyOf": [
+        {
+          "enum": [
+            "BRN",
+            "IDN",
+            "KHM",
+            "LAO",
+            "MMR",
+            "MYS",
+            "PHL",
+            "PNG",
+            "SGP",
+            "THA",
+            "TLS",
+            "VNM"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Selected country containing the detection, if any",
+      "title": "Country"
+    },
+    "detection": {
+      "$ref": "#/$defs/FirmsDetection"
+    },
+    "risk": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FireRisk"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Null when the weather needed for it is missing"
+    },
+    "weather": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ObservedWeather"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Null when no forecast covered the observation hour"
+    }
+  },
+  "required": [
+    "detection",
+    "country",
+    "weather",
+    "risk"
+  ],
+  "title": "EnrichedDetection",
+  "type": "object"
+}

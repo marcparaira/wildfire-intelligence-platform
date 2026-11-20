@@ -25,13 +25,18 @@ from kafka.consumer.fetcher import ConsumerRecord
 from psycopg.types.json import Jsonb
 
 from wildfire_events.codec import EventCodec
-from wildfire_events.models import FirmsDetection
-from wildfire_events.registry import SchemaRegistry
+from wildfire_events.models import FirmsDetection, Instrument
+from wildfire_events.registry import SubjectRegistry
 from wildfire_events.topics import FIRMS_DETECTIONS, SINK_DETECTIONS_GROUP, value_subject
+from wildfire_sink.runner import initialize_schema
 
 MATCH_DISTANCE_METERS = 1000
 MATCH_WINDOW = timedelta(minutes=20)
-SENSOR_RANK = {"VIIRS": 0, "MODIS": 1}
+# Degrees to expand a point by for the index-assisted bounding-box prefilter; must
+# exceed MATCH_DISTANCE_METERS everywhere (0.02 degrees is at least ~2.2 km of latitude).
+MATCH_BBOX_DEGREES = 0.02
+# Lower is better: VIIRS pixels (375 m) are finer than MODIS pixels (1 km).
+SENSOR_RANK: dict[Instrument, int] = {Instrument.VIIRS: 0, Instrument.MODIS: 1}
 TABLE = "fire_detections"
 
 SCHEMA: list[LiteralString] = [
@@ -78,7 +83,7 @@ _MATCH = """
     m.event_id <> d.event_id
     AND m.satellite <> d.satellite
     AND m.observed_at BETWEEN d.observed_at - %(window)s AND d.observed_at + %(window)s
-    AND m.location && ST_Expand(d.location, 0.02)
+    AND m.location && ST_Expand(d.location, %(bbox_degrees)s)
     AND ST_DWithin(m.location::geography, d.location::geography, %(meters)s)
 """
 
@@ -113,7 +118,9 @@ WHERE d.event_id = %(event_id)s
 
 @dataclass
 class DetectionProjection:
-    registry: SchemaRegistry
+    """Projection of ``firms.detections`` into ``fire_detections``; see the module docstring."""
+
+    registry: SubjectRegistry
     name: str = "detections"
     topic: str = FIRMS_DETECTIONS.name
     group_id: str = SINK_DETECTIONS_GROUP
@@ -124,27 +131,26 @@ class DetectionProjection:
         self.codec = EventCodec(FirmsDetection, value_subject(self.topic), self.registry)
 
     def initialize(self, connection: psycopg.Connection) -> None:
-        with connection.transaction():
-            for statement in SCHEMA:
-                _ = connection.execute(statement)
+        initialize_schema(connection, SCHEMA)
 
     def apply(
         self,
         connection: psycopg.Connection,
         events: Sequence[tuple[ConsumerRecord, FirmsDetection | None]],
     ) -> None:
+        # Insert the whole batch before matching, so matches within the batch are found.
         inserted: list[UUID] = []
         for _, event in events:
             if event is None:  # never delivered: this projection does not accept tombstones
                 continue
-            row = connection.execute(INSERT, row_parameters(event)).fetchone()
-            if row is not None:
+            if connection.execute(INSERT, row_parameters(event)).fetchone() is not None:
                 inserted.append(event.event_id)
         for event_id in inserted:
             parameters: dict[str, object] = {
                 "event_id": event_id,
                 "window": MATCH_WINDOW,
                 "meters": MATCH_DISTANCE_METERS,
+                "bbox_degrees": MATCH_BBOX_DEGREES,
             }
             _ = connection.execute(POINT_NEW_TO_BEST_MATCH, parameters)
             _ = connection.execute(POINT_WORSE_MATCHES_TO_NEW, parameters)

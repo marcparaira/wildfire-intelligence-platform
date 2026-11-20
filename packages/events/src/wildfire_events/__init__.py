@@ -1,1 +1,1 @@
-"""Event contracts shared by the ingestor, sink worker, and future stream processors."""
+"""Event contracts shared by the ingestor, sink worker, stream processor, and API."""

@@ -16,9 +16,11 @@ from kafka.consumer.fetcher import ConsumerRecord
 from wildfire_events.cells import cell_boundary
 from wildfire_events.codec import EventCodec
 from wildfire_events.models import WeatherForecast
-from wildfire_events.registry import SchemaRegistry
+from wildfire_events.registry import SubjectRegistry
 from wildfire_events.topics import SINK_WEATHER_GROUP, WEATHER_FORECASTS, value_subject
-from wildfire_sink.runner import record_key
+from wildfire_sink.runner import initialize_schema, record_key
+
+TABLES = ("weather_hourly", "weather_cells")
 
 SCHEMA: list[LiteralString] = [
     """
@@ -66,6 +68,9 @@ WHERE weather_cells.generated_at < EXCLUDED.generated_at
 RETURNING cell
 """
 
+DELETE_CELL = "DELETE FROM weather_cells WHERE cell = %s"
+DELETE_HOURS = "DELETE FROM weather_hourly WHERE cell = %s"
+
 INSERT_HOUR = """
 INSERT INTO weather_hourly (
     cell, valid_at, temperature_c, precipitation_mm, wind_speed_kmh, wind_direction_degrees
@@ -80,7 +85,9 @@ def boundary_geojson(cell: str) -> str:
 
 @dataclass
 class WeatherProjection:
-    registry: SchemaRegistry
+    """Projection of ``weather.forecasts``; see the module docstring."""
+
+    registry: SubjectRegistry
     name: str = "weather"
     topic: str = WEATHER_FORECASTS.name
     group_id: str = SINK_WEATHER_GROUP
@@ -91,9 +98,7 @@ class WeatherProjection:
         self.codec = EventCodec(WeatherForecast, value_subject(self.topic), self.registry)
 
     def initialize(self, connection: psycopg.Connection) -> None:
-        with connection.transaction():
-            for statement in SCHEMA:
-                _ = connection.execute(statement)
+        initialize_schema(connection, SCHEMA)
 
     def apply(
         self,
@@ -102,39 +107,46 @@ class WeatherProjection:
     ) -> None:
         for record, forecast in events:
             if forecast is None:
-                key = record_key(record)
-                if key:
-                    _ = connection.execute(
-                        "DELETE FROM weather_cells WHERE cell = %s", (key.decode(),)
-                    )
-                continue
-            updated = connection.execute(
-                UPSERT_CELL,
+                _delete_cell(connection, record)
+            else:
+                _store_if_newer(connection, forecast)
+
+
+def _delete_cell(connection: psycopg.Connection, tombstone: ConsumerRecord) -> None:
+    key = record_key(tombstone)
+    if key:
+        _ = connection.execute(DELETE_CELL, (key.decode(),))
+
+
+def _store_if_newer(connection: psycopg.Connection, forecast: WeatherForecast) -> None:
+    """Replace the cell's forecast unless the stored one was generated later."""
+    updated = connection.execute(
+        UPSERT_CELL,
+        (
+            forecast.cell,
+            forecast.latitude,
+            forecast.longitude,
+            boundary_geojson(forecast.cell),
+            forecast.provider,
+            forecast.model,
+            forecast.generated_at,
+        ),
+    ).fetchone()
+    if updated is None:
+        return
+    _ = connection.execute(DELETE_HOURS, (forecast.cell,))
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            INSERT_HOUR,
+            [
                 (
                     forecast.cell,
-                    forecast.latitude,
-                    forecast.longitude,
-                    boundary_geojson(forecast.cell),
-                    forecast.provider,
-                    forecast.model,
-                    forecast.generated_at,
-                ),
-            ).fetchone()
-            if updated is None:
-                continue
-            _ = connection.execute("DELETE FROM weather_hourly WHERE cell = %s", (forecast.cell,))
-            with connection.cursor() as cursor:
-                cursor.executemany(
-                    INSERT_HOUR,
-                    [
-                        (
-                            forecast.cell,
-                            hour.valid_at,
-                            hour.temperature_c,
-                            hour.precipitation_mm,
-                            hour.wind_speed_kmh,
-                            hour.wind_direction_degrees,
-                        )
-                        for hour in forecast.hourly
-                    ],
+                    hour.valid_at,
+                    hour.temperature_c,
+                    hour.precipitation_mm,
+                    hour.wind_speed_kmh,
+                    hour.wind_direction_degrees,
                 )
+                for hour in forecast.hourly
+            ],
+        )

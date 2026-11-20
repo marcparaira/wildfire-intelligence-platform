@@ -2,7 +2,7 @@
 
 import logging
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Sequence
 from typing import cast
 
 from kafka import KafkaAdminClient, KafkaProducer
@@ -12,12 +12,23 @@ from kafka.errors import NoBrokersAvailable, TopicAlreadyExistsError
 from wildfire_events.topics import TopicSpec
 
 LOGGER = logging.getLogger(__name__)
+CONNECT_ATTEMPTS = 60
+CONNECT_RETRY_SECONDS = 5.0
+# The local stack runs a single broker.
+REPLICATION_FACTOR = 1
+# kafka-python's maximum; the idempotent producer makes unlimited retries safe.
+MAX_PRODUCER_RETRIES = 2_147_483_647
 
 
-def admin_client(bootstrap_servers: str, attempts: int = 60, delay: float = 5) -> KafkaAdminClient:
+def _connect[C](
+    connect: Callable[[], C],
+    attempts: int = CONNECT_ATTEMPTS,
+    delay: float = CONNECT_RETRY_SECONDS,
+) -> C:
+    """Retry a client constructor while no broker is reachable (e.g. at stack startup)."""
     for attempt in range(1, attempts + 1):
         try:
-            return KafkaAdminClient(bootstrap_servers=bootstrap_servers, client_id="wildfire-admin")
+            return connect()
         except NoBrokersAvailable:
             if attempt == attempts:
                 raise
@@ -26,40 +37,61 @@ def admin_client(bootstrap_servers: str, attempts: int = 60, delay: float = 5) -
     raise AssertionError("unreachable")
 
 
-def ensure_topics(bootstrap_servers: str, specs: Iterable[TopicSpec]) -> None:
-    """Create missing topics with their configuration; existing topics are left as they are."""
+def admin_client(
+    bootstrap_servers: str,
+    attempts: int = CONNECT_ATTEMPTS,
+    delay: float = CONNECT_RETRY_SECONDS,
+) -> KafkaAdminClient:
+    return _connect(
+        lambda: KafkaAdminClient(bootstrap_servers=bootstrap_servers, client_id="wildfire-admin"),
+        attempts,
+        delay,
+    )
+
+
+def ensure_topics(bootstrap_servers: str, specs: Sequence[TopicSpec]) -> None:
+    """Create missing topics with their configuration; existing topics are left as they are.
+
+    Existing topics with the wrong partition count are logged, not changed: fixing
+    them requires recreating the topic and replaying (see ``wildfire_events.topics``).
+    """
     admin = admin_client(bootstrap_servers)
     try:
         existing = set(admin.list_topics())
-        missing = [spec for spec in specs if spec.name not in existing]
-        for spec in missing:
-            try:
-                admin.create_topics(  # pyright: ignore[reportUnknownMemberType] -- untyped in kafka-python
-                    [
-                        NewTopic(
-                            name=spec.name,
-                            num_partitions=spec.partitions,
-                            replication_factor=1,
-                            topic_configs=spec.config,
-                        )
-                    ]
-                )
-                LOGGER.info("Created topic %s", spec.name)
-            except TopicAlreadyExistsError:
-                pass
         for spec in specs:
             if spec.name in existing:
-                described = admin.describe_topics([spec.name])[0]
-                partitions = len(cast(list[object], described.get("partitions", [])))
-                if partitions != spec.partitions:
-                    LOGGER.warning(
-                        "Topic %s has %d partitions; expected %d (co-partitioning is broken)",
-                        spec.name,
-                        partitions,
-                        spec.partitions,
-                    )
+                _warn_on_partition_mismatch(admin, spec)
+            else:
+                _create_topic(admin, spec)
     finally:
         admin.close()
+
+
+def _create_topic(admin: KafkaAdminClient, spec: TopicSpec) -> None:
+    topic = NewTopic(
+        name=spec.name,
+        num_partitions=spec.partitions,
+        replication_factor=REPLICATION_FACTOR,
+        topic_configs=spec.config,
+    )
+    try:
+        admin.create_topics([topic])  # pyright: ignore[reportUnknownMemberType] -- untyped in kafka-python
+    except TopicAlreadyExistsError:
+        # Another service created it since we listed topics; that is the desired state.
+        return
+    LOGGER.info("Created topic %s", spec.name)
+
+
+def _warn_on_partition_mismatch(admin: KafkaAdminClient, spec: TopicSpec) -> None:
+    described = admin.describe_topics([spec.name])[0]
+    partitions = len(cast(list[object], described.get("partitions", [])))
+    if partitions != spec.partitions:
+        LOGGER.warning(
+            "Topic %s has %d partitions; expected %d (co-partitioning is broken)",
+            spec.name,
+            partitions,
+            spec.partitions,
+        )
 
 
 def idempotent_producer(bootstrap_servers: str, client_id: str) -> KafkaProducer:
@@ -67,22 +99,16 @@ def idempotent_producer(bootstrap_servers: str, client_id: str) -> KafkaProducer
 
     kafka-python only supports idempotence with one in-flight request per broker.
     """
-    for attempt in range(1, 61):
-        try:
-            return KafkaProducer(
-                bootstrap_servers=bootstrap_servers,
-                client_id=client_id,
-                enable_idempotence=True,
-                acks="all",
-                retries=2147483647,
-                max_in_flight_requests_per_connection=1,
-                linger_ms=20,
-                compression_type="gzip",
-                request_timeout_ms=30000,
-            )
-        except NoBrokersAvailable:
-            if attempt == 60:
-                raise
-            LOGGER.warning("Kafka unavailable; retrying in 5s")
-            time.sleep(5)
-    raise AssertionError("unreachable")
+    return _connect(
+        lambda: KafkaProducer(
+            bootstrap_servers=bootstrap_servers,
+            client_id=client_id,
+            enable_idempotence=True,
+            acks="all",
+            retries=MAX_PRODUCER_RETRIES,
+            max_in_flight_requests_per_connection=1,
+            linger_ms=20,
+            compression_type="gzip",
+            request_timeout_ms=30_000,
+        )
+    )

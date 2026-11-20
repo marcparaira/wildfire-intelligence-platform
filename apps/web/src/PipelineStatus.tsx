@@ -96,14 +96,14 @@ export function PipelineStatusPage({ state }: { state: PipelineState }) {
 
           <section>
             <h3>Consumer lag</h3>
-            <p className="status-note">Records each sink-worker consumer group has yet to project into PostGIS.</p>
+            <p className="status-note">Records each consumer group has yet to process: sink-worker groups project topics into PostGIS, stream-processor groups derive incidents, enriched detections, and statistics.</p>
             {status.consumers ? (
               <div className="table-wrap">
                 <table aria-label="Consumer lag">
                   <thead><tr><th>Consumer group</th><th>Topic</th><th>State</th><th className="num">Members</th><th className="num">Lag</th><th>Per partition</th></tr></thead>
                   <tbody>
                     {status.consumers.map((consumer) => (
-                      <tr key={consumer.group_id}>
+                      <tr key={`${consumer.group_id}|${consumer.topic}`}>
                         <th scope="row">{consumer.group_id}</th>
                         <td>{consumer.topic}</td>
                         <td><span className="group-state" data-state={consumer.state}>{consumer.state}</span></td>
@@ -147,7 +147,7 @@ export function PipelineStatusPage({ state }: { state: PipelineState }) {
             {status.dead_letters ? (
               <>
                 <p className="status-note">
-                  <strong>{formatCount(status.dead_letters.last_day)}</strong> in the last 24 h, {formatCount(status.dead_letters.retained)} retained in <code>{status.dead_letters.topic}</code>.
+                  <strong>{formatCount(status.dead_letters.last_day)}</strong> in the last 24 h, {formatCount(status.dead_letters.retained)} retained in {status.dead_letters.topics.map((topic, index) => <span key={topic}>{index > 0 && ", "}<code>{topic}</code></span>)}.
                   {status.dead_letters.sample_truncated && " Per-topic counts cover only the newest records."}
                 </p>
                 {status.dead_letters.recent.length > 0 ? (

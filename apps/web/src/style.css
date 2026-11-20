@@ -216,6 +216,67 @@ button:focus-visible, input:focus-visible, select:focus-visible, .map:focus-visi
 .recent-item small { margin-top: 3px; color: #596761; font-size: 11px; }
 .recent-foot { padding-top: 8px; font-size: 11px; }
 
+.detail-content h3 { margin: 14px 0 4px; font-size: 12px; font-weight: 650; }
+.detail-content .detail-note, .detail-note { margin: 4px 0 0; color: #596761; font-size: 11px; line-height: 1.4; }
+.detail-type .status-badge { font-weight: 600; }
+
+.incidents { border-top: 1px solid #d7ddda; }
+.layer-toggle { display: flex; align-items: center; gap: 6px; padding: 8px 12px 4px; color: #37473e; font-size: 12px; }
+.layer-toggle input { margin: 0; accent-color: #3f5e4d; }
+.incident-list { margin: 0; padding: 4px 0; list-style: none; max-height: 320px; overflow-y: auto; }
+.incident-item {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  padding: 7px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.incident-item:hover { background: #edf1ee; }
+.incident-item[aria-pressed="true"] { background: #e0e9e2; box-shadow: inset 3px 0 #3f5e4d; }
+.incident-item-head, .incident-item-figures { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.incident-item-figures strong { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.incident-item-figures span, .incident-item small { color: #596761; font-size: 11px; font-variant-numeric: tabular-nums; }
+.incident-message { margin: 0; padding: 8px 12px; color: #596761; font-size: 11px; line-height: 1.4; }
+.incident-message.map-error { color: #8b301d; }
+.status-badge, .risk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #37473e;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.status-badge i { width: 9px; height: 9px; border-radius: 50%; }
+.risk-badge i { width: 8px; height: 8px; border-radius: 1px; }
+.risk-badge[data-level="unknown"] { color: #7b8781; font-weight: 400; }
+.risk-badge[data-level="high"], .risk-badge[data-level="extreme"] { color: #8b301d; }
+
+.growth-chart { margin: 4px 0 0; }
+.growth-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-axis { stroke: #aebbb4; stroke-width: 1; }
+.chart-bar { fill: #e7a06f; }
+.chart-line { fill: none; stroke: #315f7b; stroke-width: 2; stroke-linejoin: round; }
+.chart-label { fill: #596761; font-size: 10px; font-variant-numeric: tabular-nums; }
+.growth-chart figcaption { display: grid; gap: 2px; margin-top: 4px; color: #596761; font-size: 11px; }
+.growth-chart figcaption span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-key-bar { width: 9px; height: 9px; background: #e7a06f; }
+.chart-key-line { width: 12px; height: 2px; background: #315f7b; }
+.chart-data { margin-top: 6px; font-size: 11px; }
+.chart-data summary { color: #1d5a87; cursor: pointer; }
+.chart-data table, .outlook { width: 100%; margin-top: 4px; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-data th, .chart-data td, .outlook th, .outlook td { padding: 3px 4px; border-bottom: 1px solid #e1e5e2; text-align: right; font-weight: 400; white-space: nowrap; }
+.chart-data th:first-child, .outlook th:first-child { text-align: left; }
+.chart-data thead th, .outlook thead th { color: #46564d; font-weight: 600; }
+.weather-context dl { margin-top: 0; }
+
+.incident-legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; white-space: nowrap; }
+.incident-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.incident-legend i { width: 11px; height: 11px; border: 2px solid; border-radius: 50%; }
+
 .topnav { display: flex; gap: 2px; }
 .topnav a {
   padding: 6px 10px;

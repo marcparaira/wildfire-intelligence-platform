@@ -6,17 +6,36 @@ diff, and the registry's BACKWARD compatibility check rejects breaking changes.
 """
 
 import json
-import sys
+import logging
 from importlib.resources import files
+from pathlib import Path
 
 from pydantic import BaseModel
 
-from wildfire_events.models import FirmsDetection, WeatherForecast
-from wildfire_events.topics import FIRMS_DETECTIONS, WEATHER_FORECASTS, value_subject
+from wildfire_events.models import (
+    EnrichedDetection,
+    FireIncident,
+    FirmsDetection,
+    HourlyDetectionStats,
+    WeatherForecast,
+)
+from wildfire_events.topics import (
+    DETECTIONS_ENRICHED,
+    FIRE_INCIDENTS,
+    FIRMS_DETECTIONS,
+    STATS_HOURLY,
+    WEATHER_FORECASTS,
+    value_subject,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 SUBJECT_MODELS: dict[str, type[BaseModel]] = {
     value_subject(FIRMS_DETECTIONS.name): FirmsDetection,
     value_subject(WEATHER_FORECASTS.name): WeatherForecast,
+    value_subject(FIRE_INCIDENTS.name): FireIncident,
+    value_subject(DETECTIONS_ENRICHED.name): EnrichedDetection,
+    value_subject(STATS_HOURLY.name): HourlyDetectionStats,
 }
 
 
@@ -30,12 +49,13 @@ def load(model: type[BaseModel]) -> str:
 
 
 def main() -> None:
-    root = files("wildfire_events").joinpath("schemas")
+    """Regenerate the checked-in schemas; only meaningful from an editable install."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    root = Path(str(files("wildfire_events").joinpath("schemas")))
     for model in SUBJECT_MODELS.values():
-        path = root.joinpath(f"{model.__name__}.json")
-        with open(str(path), "w", encoding="utf-8") as handle:
-            _ = handle.write(generate(model))
-        print(f"wrote {path}", file=sys.stderr)
+        path = root / f"{model.__name__}.json"
+        _ = path.write_text(generate(model), encoding="utf-8")
+        LOGGER.info("wrote %s", path)
 
 
 if __name__ == "__main__":

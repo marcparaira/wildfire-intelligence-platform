@@ -15,27 +15,8 @@ dependencies = [
     "psycopg[binary]>=3.2,<4",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.3,<9",
-    "ruff>=0.9,<1",
-]
-
 [project.scripts]
 wildfire-sink-worker = "wildfire_sink.service:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py312"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["wildfire_events", "wildfire_sink"]

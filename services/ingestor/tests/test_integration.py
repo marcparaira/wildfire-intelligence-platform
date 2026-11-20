@@ -16,11 +16,11 @@ from kafka.admin import KafkaAdminClient, NewTopic
 
 from wildfire_events.codec import EventCodec
 from wildfire_events.kafka import idempotent_producer
-from wildfire_events.models import FirmsDetection
+from wildfire_events.models import FirmsDetection, FirmsProduct
 from wildfire_events.registry import SchemaRegistry
-from wildfire_ingestor.firms import parse_csv
-from wildfire_ingestor.log import PublishedEvents, latest_publish_time
-from wildfire_ingestor.publisher import Publisher
+from wildfire_ingestor.detections import parse_csv
+from wildfire_ingestor.log import latest_publish_time, load_published_events
+from wildfire_ingestor.publisher import PublishedEvents, Publisher
 
 KAFKA = os.environ.get("INGESTOR_TEST_KAFKA", "")
 REGISTRY = os.environ.get("INGESTOR_TEST_SCHEMA_REGISTRY", "")
@@ -36,7 +36,7 @@ def test_a_restarted_ingestor_does_not_republish_what_is_in_the_log() -> None:
     admin.create_topics([NewTopic(topic, 6, 1)])  # pyright: ignore[reportUnknownMemberType]
     producer = idempotent_producer(KAFKA, "ingestor-test")
     codec = EventCodec(FirmsDetection, f"{topic}-value", SchemaRegistry(REGISTRY))
-    events = parse_csv(FIXTURE.read_text(), "VIIRS_NOAA20_NRT").detections
+    events = parse_csv(FIXTURE.read_text(), FirmsProduct.VIIRS_NOAA20_NRT).detections
     try:
         assert latest_publish_time(KAFKA, topic) is None
 
@@ -53,7 +53,7 @@ def test_a_restarted_ingestor_does_not_republish_what_is_in_the_log() -> None:
         assert publisher(PublishedEvents(timedelta(days=3))).publish(events) == (2, 0)
 
         restarted = PublishedEvents(timedelta(days=3))
-        assert restarted.load(KAFKA, topic) == 2
+        assert load_published_events(KAFKA, topic, restarted) == 2
         assert publisher(restarted).publish(events) == (0, 2)
         assert latest_publish_time(KAFKA, topic) is not None
     finally:
@@ -66,4 +66,4 @@ def test_a_restarted_ingestor_does_not_republish_what_is_in_the_log() -> None:
                 with cast(HTTPResponse, urlopen(request, timeout=10)):
                     pass
             except OSError:
-                pass
+                pass  # Best-effort cleanup; the subject may already be gone.

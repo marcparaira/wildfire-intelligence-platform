@@ -56,7 +56,8 @@ export interface DeadLetter {
 }
 
 export interface DeadLetterStatus {
-  topic: string;
+  /** Every service's dead-letter topic. */
+  topics: string[];
   retained: number;
   last_day: number;
   by_topic: Record<string, number>;

@@ -1,8 +1,18 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import type { IncidentDetailState, IncidentsState } from "./incidents";
 import type { Hotspot } from "./hotspots";
 import { mergeHotspots } from "./hotspots";
+
+const incidentState = vi.hoisted(() => ({ current: { items: [], truncated: false, loading: false, error: "" } as IncidentsState }));
+const incidentDetailState = vi.hoisted(() => ({ current: { incident: null, loading: false, error: "" } as IncidentDetailState }));
+// Incidents have their own tests; keep their requests out of the fetch call counts here.
+vi.mock("./incidents", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./incidents")>(),
+  useIncidents: () => incidentState.current,
+  useIncidentDetail: () => incidentDetailState.current,
+}));
 
 vi.mock("./MapView", () => ({
   default: ({ hotspots, onSelect }: { hotspots: Hotspot[]; onSelect: (eventId: string) => void }) => (

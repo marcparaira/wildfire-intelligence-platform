@@ -9,10 +9,13 @@ import VectorLayer from "ol/layer/Vector";
 import { fromLonLat, transformExtent } from "ol/proj";
 import OSM from "ol/source/OSM";
 import VectorSource from "ol/source/Vector";
-import { Fill, Stroke, Style, Text } from "ol/style";
+import { Circle, Fill, Stroke, Style, Text } from "ol/style";
+import type { FeatureLike } from "ol/Feature";
 import "ol/ol.css";
 import { frpStyles } from "./frp";
 import type { Bounds, Hotspot } from "./hotspots";
+import { incidentMarkerRadius, incidentStatuses } from "./incidents";
+import type { IncidentSummary } from "./incidents";
 import { weatherColor, weatherValue } from "./weather";
 import type { WeatherMetric, WeatherPoint } from "./weather";
 
@@ -24,6 +27,45 @@ interface MapViewProps {
   areaBounds: Bounds | null;
   selectedId: string | null;
   onSelect: (eventId: string) => void;
+  incidents?: IncidentSummary[];
+  selectedIncidentId?: string | null;
+  onSelectIncident?: (incidentId: string) => void;
+  /** Zooms to these bounds whenever the value changes (for example a selected incident). */
+  focusBounds?: Bounds | null;
+}
+
+/** Incident outlines appear from about zoom 8, where they are larger than the marker. */
+const OUTLINE_MAX_RESOLUTION = 700;
+function withAlpha(hex: string, alpha: number): string {
+  const channels = [1, 3, 5].map((start) => Number.parseInt(hex.slice(start, start + 2), 16));
+  return `rgba(${channels.join(",")},${alpha})`;
+}
+
+function incidentStyle(feature: FeatureLike, resolution: number): Style | Style[] | undefined {
+  const incident = feature.get("incident") as IncidentSummary;
+  const selected = feature.get("selected") === true;
+  const color = incidentStatuses[incident.status].color;
+  if (feature.get("kind") === "outline") {
+    if (resolution > OUTLINE_MAX_RESOLUTION) return undefined;
+    return new Style({
+      stroke: new Stroke({ color, width: selected ? 2.5 : 1.5, lineDash: [4, 3] }),
+      fill: new Fill({ color: withAlpha(color, 0.06) }),
+    });
+  }
+  const radius = incidentMarkerRadius(incident.footprint_km2);
+  const marker = new Style({
+    image: new Circle({
+      radius,
+      fill: new Fill({ color: withAlpha(color, 0.22) }),
+      stroke: new Stroke({ color, width: selected ? 3.5 : 2.5 }),
+    }),
+    zIndex: selected ? 2 : 1,
+  });
+  if (!selected) return marker;
+  return [
+    new Style({ image: new Circle({ radius: radius + 3, stroke: new Stroke({ color: "#fff", width: 4 }) }), zIndex: 2 }),
+    marker,
+  ];
 }
 
 export default function MapView({
@@ -34,19 +76,27 @@ export default function MapView({
   areaBounds,
   selectedId,
   onSelect,
+  incidents = [],
+  selectedIncidentId = null,
+  onSelectIncident,
+  focusBounds = null,
 }: MapViewProps) {
   const target = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const sourceRef = useRef(new VectorSource());
   const weatherSourceRef = useRef(new VectorSource());
   const areaSourceRef = useRef(new VectorSource());
+  const incidentSourceRef = useRef(new VectorSource());
   const selectRef = useRef(onSelect);
   selectRef.current = onSelect;
+  const selectIncidentRef = useRef(onSelectIncident);
+  selectIncidentRef.current = onSelectIncident;
 
   useEffect(() => {
     if (!target.current) return;
     const hotspotLayer = new VectorLayer({ source: sourceRef.current });
     const weatherLayer = new VectorLayer({ source: weatherSourceRef.current });
+    const incidentLayer = new VectorLayer({ source: incidentSourceRef.current, style: incidentStyle });
     const map = new Map({
       target: target.current,
       layers: [
@@ -59,6 +109,7 @@ export default function MapView({
             new Style({ stroke: new Stroke({ color: "#315f7b", width: 2, lineDash: [8, 5] }) }),
           ],
         }),
+        incidentLayer,
         hotspotLayer,
       ],
       view: new View({ center: fromLonLat([114, 1.5]), zoom: 5 }),
@@ -69,7 +120,17 @@ export default function MapView({
         layerFilter: (layer) => layer === hotspotLayer,
       });
       const id = feature?.getId();
-      if (typeof id === "string") selectRef.current(id);
+      if (typeof id === "string") {
+        selectRef.current(id);
+        return;
+      }
+      // Detections take precedence: an incident marker sits on top of its own detections.
+      const incident = map.forEachFeatureAtPixel(event.pixel, (item) => item, {
+        hitTolerance: 2,
+        layerFilter: (layer) => layer === incidentLayer,
+      });
+      const incidentId = incident?.get("incidentId") as unknown;
+      if (typeof incidentId === "string") selectIncidentRef.current?.(incidentId);
     });
     mapRef.current = map;
     return () => {
@@ -133,6 +194,29 @@ export default function MapView({
   }, [hotspots, selectedId]);
 
   useEffect(() => {
+    const source = incidentSourceRef.current;
+    source.clear();
+    for (const incident of incidents) {
+      const selected = incident.incident_id === selectedIncidentId;
+      const marker = new Feature({
+        geometry: new Point(fromLonLat([incident.longitude, incident.latitude])),
+        kind: "marker",
+        incident,
+        incidentId: incident.incident_id,
+        selected,
+      });
+      const outline = new Feature({
+        geometry: fromExtent(transformExtent(incident.bbox, "EPSG:4326", "EPSG:3857")),
+        kind: "outline",
+        incident,
+        incidentId: incident.incident_id,
+        selected,
+      });
+      source.addFeatures([outline, marker]);
+    }
+  }, [incidents, selectedIncidentId]);
+
+  useEffect(() => {
     const source = areaSourceRef.current;
     source.clear();
     if (areaBounds) {
@@ -147,6 +231,17 @@ export default function MapView({
       duration: 300,
     });
   }, [bounds]);
+
+  const focusKey = focusBounds?.join(",") ?? "";
+  useEffect(() => {
+    if (!focusKey) return;
+    const extent = focusKey.split(",").map(Number) as Bounds;
+    mapRef.current?.getView().fit(transformExtent(extent, "EPSG:4326", "EPSG:3857"), {
+      padding: [60, 60, 60, 60],
+      maxZoom: 11,
+      duration: 300,
+    });
+  }, [focusKey]);
 
   return <div ref={target} className="map" role="region" aria-label="Hotspot map" tabIndex={0} />;
 }

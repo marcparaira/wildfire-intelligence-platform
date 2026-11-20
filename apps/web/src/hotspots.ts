@@ -1,3 +1,5 @@
+import type { DetectionRisk, DetectionWeather } from "./conditions";
+
 export interface Hotspot {
   /** PostGIS row ID; null for a detection that arrived live and is not stored yet. */
   id: number | null;
@@ -10,6 +12,11 @@ export interface Hotspot {
   longitude: number;
   attributes: Record<string, string>;
   duplicate_of: string | null;
+  /** ISO 3166-1 alpha-3 code; absent or null until the detection has been enriched. */
+  country?: string | null;
+  risk?: DetectionRisk | null;
+  /** Forecast weather at the observation hour. */
+  weather?: DetectionWeather | null;
 }
 
 export interface HotspotResults {

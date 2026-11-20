@@ -1,0 +1,67 @@
+{
+  "additionalProperties": false,
+  "description": "Detections and FRP in one country during one UTC hour of observation time.\n\nEach update replaces the previous value for the same key (``<country>|<hour_start>``)\nin the compacted topic, so the latest record is the running total.",
+  "properties": {
+    "country": {
+      "enum": [
+        "BRN",
+        "IDN",
+        "KHM",
+        "LAO",
+        "MMR",
+        "MYS",
+        "PHL",
+        "PNG",
+        "SGP",
+        "THA",
+        "TLS",
+        "VNM"
+      ],
+      "title": "Country",
+      "type": "string"
+    },
+    "detections": {
+      "minimum": 1,
+      "title": "Detections",
+      "type": "integer"
+    },
+    "detections_with_frp": {
+      "minimum": 0,
+      "title": "Detections With Frp",
+      "type": "integer"
+    },
+    "hour_start": {
+      "format": "date-time",
+      "title": "Hour Start",
+      "type": "string"
+    },
+    "max_frp_mw": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Frp Mw"
+    },
+    "total_frp_mw": {
+      "description": "Sum of the known FRP values",
+      "minimum": 0,
+      "title": "Total Frp Mw",
+      "type": "number"
+    }
+  },
+  "required": [
+    "country",
+    "hour_start",
+    "detections",
+    "detections_with_frp",
+    "total_frp_mw"
+  ],
+  "title": "HourlyDetectionStats",
+  "type": "object"
+}

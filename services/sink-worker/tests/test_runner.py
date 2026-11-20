@@ -1,7 +1,9 @@
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
-from typing import cast
+from datetime import UTC, datetime
+from threading import Event as StopEvent
+from typing import Self, cast
 
 import psycopg
 import pytest
@@ -10,7 +12,7 @@ from kafka.structs import OffsetAndMetadata, TopicPartition
 from pydantic import BaseModel
 
 from wildfire_events.codec import InvalidEvent
-from wildfire_sink.runner import process_batch
+from wildfire_sink.runner import DeadLetters, ProjectionWorker, RecordConsumer, process_batch
 
 PARTITION = TopicPartition("firms.detections", 2)
 GROUP_ID = "sink-worker.test"
@@ -92,6 +94,12 @@ class FakeConnection:
     def transaction(self) -> AbstractContextManager[None]:
         return nullcontext()
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
 
 def connection() -> psycopg.Connection:
     return cast(psycopg.Connection, cast(object, FakeConnection()))
@@ -137,3 +145,116 @@ def test_tombstones_reach_projections_that_accept_them() -> None:
         job, connection(), FakeConsumer(), FakeDeadLetters(), PARTITION, [record(3, None)]
     )
     assert job.applied[0][0][1] is None
+
+
+@dataclass
+class FakeFuture:
+    timeouts: list[float | None] = field(default_factory=list)
+
+    def get(self, timeout: float | None = None) -> object:
+        self.timeouts.append(timeout)
+        return None
+
+
+@dataclass
+class FakeProducer:
+    sent: list[tuple[str, bytes | None, bytes | None, list[tuple[str, bytes]]]] = field(
+        default_factory=list
+    )
+    future: FakeFuture = field(default_factory=FakeFuture)
+
+    def send(
+        self,
+        topic: str,
+        value: bytes | None = None,
+        key: bytes | None = None,
+        headers: Sequence[tuple[str, bytes]] | None = None,
+    ) -> FakeFuture:
+        self.sent.append((topic, key, value, list(headers or [])))
+        return self.future
+
+
+def test_dead_letters_keep_the_record_and_describe_the_failure() -> None:
+    producer = FakeProducer()
+    failed_at = datetime(2026, 3, 5, 6, 0, tzinfo=UTC)
+    sink = DeadLetters(producer, "dlq", clock=lambda: failed_at)
+
+    sink.send(record(42, b"payload"), GROUP_ID, "x" * 5000)
+
+    [(topic, key, value, headers)] = producer.sent
+    assert (topic, key, value) == ("dlq", b"cell", b"payload")
+    assert dict(headers) == {
+        "dlq.original.topic": PARTITION.topic.encode(),
+        "dlq.original.partition": b"2",
+        "dlq.original.offset": b"42",
+        "dlq.consumer.group": GROUP_ID.encode(),
+        "dlq.error": b"x" * 1000,
+        "dlq.failed.at": failed_at.isoformat().encode(),
+    }
+    assert producer.future.timeouts == [60]
+
+
+@dataclass
+class FakeRecordConsumer:
+    """Returns each queued poll result once, then sets ``stop``."""
+
+    stop: StopEvent
+    polls: list[dict[TopicPartition, list[ConsumerRecord]]]
+    commits: list[Mapping[TopicPartition, OffsetAndMetadata] | None] = field(default_factory=list)
+    closed_with_autocommit: list[bool] = field(default_factory=list)
+
+    def poll(self, timeout_ms: int = 0) -> dict[TopicPartition, list[ConsumerRecord]]:
+        del timeout_ms
+        if len(self.polls) == 1:
+            self.stop.set()
+        return self.polls.pop(0)
+
+    def commit(
+        self,
+        offsets: Mapping[TopicPartition, OffsetAndMetadata] | None = None,
+        timeout_ms: int | None = None,
+    ) -> None:
+        del timeout_ms
+        self.commits.append(offsets)
+
+    def close(self, *, autocommit: bool = True) -> None:
+        self.closed_with_autocommit.append(autocommit)
+
+
+def test_worker_applies_polled_batches_and_closes_without_autocommit() -> None:
+    stop = StopEvent()
+    consumer = FakeRecordConsumer(stop, [{PARTITION: [record(1), record(2)]}])
+    job = FakeProjection()
+    worker = ProjectionWorker(
+        job, lambda: consumer, connection, dead_letters=FakeDeadLetters(), stop=stop
+    )
+
+    worker.run_until_stopped()
+
+    assert [[item[0].offset for item in batch] for batch in job.applied] == [[1, 2]]
+    assert consumer.commits == [{PARTITION: OffsetAndMetadata(3, "", -1)}]
+    assert consumer.closed_with_autocommit == [False]
+
+
+def test_worker_restarts_with_a_fresh_connection_after_a_transient_failure() -> None:
+    stop = StopEvent()
+    consumer = FakeRecordConsumer(stop, [{}])
+    attempts: list[int] = []
+
+    def connect() -> psycopg.Connection:
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            raise psycopg.OperationalError("database starting up")
+        return connection()
+
+    def open_consumer() -> RecordConsumer:
+        return consumer
+
+    worker = ProjectionWorker(
+        FakeProjection(), open_consumer, connect, FakeDeadLetters(), stop, restart_delay=0
+    )
+
+    worker.run_until_stopped()
+
+    assert len(attempts) == 2
+    assert consumer.closed_with_autocommit == [False]

@@ -3,3 +3,12 @@
 - Each open dashboard holds its own Kafka consumer, which is fine at this scale.
 - Source freshness is based on the newest stored record. A FIRMS product that is polled successfully but has no new detections looks the same as one whose polls fail.
 - Freshness thresholds are fixed in the API and do not follow a changed `WEATHER_INTERVAL_MINUTES` or `FIRMS_INTERVAL_MINUTES`.
+- Fire incidents never cross a resolution-2 H3 cell (~160 km edge) boundary, the Kafka key; a fire on a boundary becomes two incidents.
+- Incident status changes that only depend on time passing (for example becoming inactive) are applied when a later detection arrives in the same Kafka partition. If FIRMS stops delivering, incidents keep their last status.
+- A detection that arrives after its incident has become inactive starts a new incident.
+- Detection weather is a forecast value for the resolution-2 H3 cell (about 87,000 km²), not a local observation.
+- Enrichment depends on retained forecasts: detections replayed from before the oldest retained forecast hours get no weather or risk, and the 24-hour precipitation stays unknown until a cell has a full day of history.
+- The fire risk indicator is an uncalibrated screening heuristic, not a fire danger rating.
+- An incident's peak risk is matched by bounding box, because detections are not linked to incidents.
+- Live detections show no country, weather, or risk until the list is refreshed.
+- Hourly statistics count cross-sensor observations of the same fire separately, and drop detections more than 3 days late.

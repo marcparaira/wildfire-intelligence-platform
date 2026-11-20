@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from kafka.structs import TopicPartition
 
+from wildfire_api.bounds import Bounds
 from wildfire_api.live import (
-    Bounds,
-    DetectionFeed,
+    DetectionBatcher,
     format_position,
     parse_position,
     sse_message,
@@ -16,7 +16,7 @@ from wildfire_api.live import (
 from wildfire_api.main import app
 from wildfire_events.cells import partition_cell
 from wildfire_events.codec import InvalidEvent
-from wildfire_events.models import FirmsDetection, detection_event_id
+from wildfire_events.models import FirmsDetection, FirmsProduct, Instrument, detection_event_id
 
 client: httpx.Client = TestClient(app)
 OBSERVED = datetime(2026, 3, 5, 5, 30, tzinfo=UTC)
@@ -24,9 +24,11 @@ OBSERVED = datetime(2026, 3, 5, 5, 30, tzinfo=UTC)
 
 def detection(latitude: float, longitude: float) -> FirmsDetection:
     return FirmsDetection(
-        event_id=detection_event_id("MODIS_NRT", "Terra", OBSERVED, str(latitude), str(longitude)),
-        product="MODIS_NRT",
-        instrument="MODIS",
+        event_id=detection_event_id(
+            FirmsProduct.MODIS_NRT, "Terra", OBSERVED, str(latitude), str(longitude)
+        ),
+        product=FirmsProduct.MODIS_NRT,
+        instrument=Instrument.MODIS,
         satellite="Terra",
         observed_at=OBSERVED,
         latitude=latitude,
@@ -61,11 +63,8 @@ class FakeCodec:
         return self.events[int(value)]
 
 
-def feed_for(events: list[FirmsDetection], position: dict[int, int]) -> DetectionFeed:
-    feed = DetectionFeed.__new__(DetectionFeed)
-    feed.codec = FakeCodec(events)  # pyright: ignore[reportAttributeAccessIssue]
-    feed.position = dict(position)
-    return feed
+def batcher_for(events: list[FirmsDetection], position: dict[int, int]) -> DetectionBatcher:
+    return DetectionBatcher(FakeCodec(events), position)
 
 
 @pytest.mark.parametrize(
@@ -98,23 +97,31 @@ def test_sse_message_format() -> None:
 
 
 def test_batch_filters_bounds_skips_invalid_records_and_advances_position() -> None:
-    feed = feed_for([INSIDE, OUTSIDE], {0: 10, 1: 5, 2: 7})
+    batcher = batcher_for([INSIDE, OUTSIDE], {0: 10, 1: 5, 2: 7})
     polled = {
         TopicPartition("firms.detections", 0): [Record(10, b"0"), Record(11, b"bad")],
         TopicPartition("firms.detections", 1): [Record(5, b"1")],
     }
-    batch = list(feed._matching(polled, BORNEO))  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+    batch = batcher.matching(polled, BORNEO)
 
     assert [item.event_id for item in batch] == [INSIDE.event_id]
-    assert batch[0].id is None and batch[0].duplicate_of is None
+    assert batch[0].id is None
+    assert batch[0].duplicate_of is None
     assert batch[0].source == "MODIS_NRT"
     # Every record read moves the position, including invalid and filtered ones.
-    assert feed.position == {0: 12, 1: 6, 2: 7}
+    assert batcher.position == {0: 12, 1: 6, 2: 7}
 
 
 def test_without_bounds_every_valid_detection_is_sent() -> None:
-    feed = feed_for([INSIDE, OUTSIDE], {0: 0})
+    batcher = batcher_for([INSIDE, OUTSIDE], {0: 0})
     polled = {TopicPartition("firms.detections", 0): [Record(0, b"0"), Record(1, b"1")]}
-    batch = list(feed._matching(polled, None))  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+    batch = batcher.matching(polled, None)
     assert [item.event_id for item in batch] == [INSIDE.event_id, OUTSIDE.event_id]
 
+
+@pytest.mark.parametrize(
+    ("latitude", "longitude", "inside"),
+    [(-5, 108, True), (8, 120, True), (0, 107.9, False), (8.1, 114, False)],
+)
+def test_bounds_include_their_edges(latitude: float, longitude: float, *, inside: bool) -> None:
+    assert BORNEO.contains(latitude, longitude) is inside

@@ -11,15 +11,7 @@ dependencies = [
     "wildfire-events",
     "h3>=4.2,<5",
     "kafka-python>=2.2,<3",
-    "numpy>=2,<3",
     "pydantic>=2.10,<3",
-    "shapely>=2.0,<3",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.3,<9",
-    "ruff>=0.9,<1",
 ]
 
 [project.scripts]
@@ -28,18 +20,3 @@ wildfire-ingestor = "wildfire_ingestor.service:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools.package-data]
-wildfire_ingestor = ["data/*.geojson"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py312"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["wildfire_events", "wildfire_ingestor"]

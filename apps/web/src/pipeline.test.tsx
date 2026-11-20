@@ -34,7 +34,7 @@ const status: PipelineStatus = {
     },
   ],
   dead_letters: {
-    topic: "sink-worker.dlq", retained: 9, last_day: 2, by_topic: { "firms.detections": 2 }, sample_truncated: false,
+    topics: ["sink-worker.dlq", "stream-processor.dlq"], retained: 9, last_day: 2, by_topic: { "firms.detections": 2 }, sample_truncated: false,
     recent: [{
       failed_at: "2026-03-05T11:00:00Z", topic: "firms.detections", partition: 3, offset: 99,
       group_id: "sink-worker.postgis.detections", error: "h3_cell does not contain the detection",
@@ -106,7 +106,7 @@ describe("pipeline status page", () => {
     expect(lag).toHaveTextContent("p0 7");
     expect(within(screen.getByRole("table", { name: "Topic throughput" })).getByRole("row", { name: /firms\.detections/ })).toHaveTextContent("1,400");
     expect(screen.getByText("h3_cell does not contain the detection")).toBeInTheDocument();
-    expect(screen.getByText(/in the last 24 h, 9 retained/)).toBeInTheDocument();
+    expect(screen.getByText(/in the last 24 h, 9 retained/)).toHaveTextContent("sink-worker.dlq, stream-processor.dlq");
   });
 
   it("marks Kafka sections unavailable", () => {

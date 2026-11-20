@@ -12,49 +12,74 @@ from kafka.structs import OffsetAndTimestamp, TopicPartition
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
-from wildfire_api import pipeline
 from wildfire_api.main import app
-from wildfire_api.pipeline import (
-    KafkaSection,
-    PipelineStatus,
-    _DetectionStats,  # pyright: ignore[reportPrivateUsage]
-    _ForecastStats,  # pyright: ignore[reportPrivateUsage]
-    classify,
+from wildfire_api.pipeline.kafka_offsets import (
+    GroupState,
     consumer_status,
+    consumer_statuses,
     messages_since,
-    source_statuses,
     summarize_dead_letters,
 )
+from wildfire_api.pipeline.models import (
+    Freshness,
+    KafkaSection,
+    PipelineStatus,
+    SourceKind,
+    SourceSpec,
+    SourceStatus,
+)
+from wildfire_api.pipeline.routes import status_cache, status_collector
+from wildfire_api.pipeline.sources import (
+    DetectionStats,
+    ForecastStats,
+    PostgisSources,
+    source_statuses,
+)
+from wildfire_api.pipeline.status import (
+    KAFKA_UNAVAILABLE,
+    POSTGIS_UNAVAILABLE,
+    PipelineStatusCollector,
+    StatusCache,
+)
+from wildfire_events.topics import ALL_TOPICS, CONSUMER_GROUPS, ENRICHMENT_GROUP
 
 client: httpx.Client = TestClient(app)
 NOW = datetime(2026, 3, 5, 12, 0, tzinfo=UTC)
+EMPTY_STATUS = PipelineStatus(
+    checked_at=NOW, sources=[], topics=None, consumers=None, dead_letters=None, errors=[]
+)
 
 
 @pytest.fixture(autouse=True)
-def fresh_cache() -> Iterator[None]:
-    pipeline.clear_cache()
+def isolated_app() -> Iterator[None]:
+    status_cache().clear()
     yield
-    pipeline.clear_cache()
+    status_cache().clear()
+    app.dependency_overrides.clear()
 
 
 @pytest.mark.parametrize(
     ("age", "expected"),
     [
-        (None, "no_data"),
-        (timedelta(hours=1), "fresh"),
-        (timedelta(hours=18), "fresh"),
-        (timedelta(hours=19), "delayed"),
-        (timedelta(hours=37), "stale"),
+        (None, Freshness.NO_DATA),
+        (timedelta(hours=1), Freshness.FRESH),
+        (timedelta(hours=18), Freshness.FRESH),
+        (timedelta(hours=19), Freshness.DELAYED),
+        (timedelta(hours=36), Freshness.DELAYED),
+        (timedelta(hours=37), Freshness.STALE),
     ],
 )
-def test_classify(age: timedelta | None, expected: str) -> None:
+def test_classify(age: timedelta | None, expected: Freshness) -> None:
+    spec = SourceSpec(
+        "s", "S", SourceKind.OBSERVATION, "t", timedelta(hours=18), timedelta(hours=36)
+    )
     latest = None if age is None else NOW - age
-    assert classify(latest, NOW, timedelta(hours=18), timedelta(hours=36)) == expected
+    assert spec.classify(latest, NOW) == expected
 
 
 def test_source_statuses_cover_every_source() -> None:
     detections = [
-        _DetectionStats(
+        DetectionStats(
             product="VIIRS_NOAA20_NRT",
             latest_observed_at=NOW - timedelta(hours=4),
             latest_ingested_at=NOW - timedelta(minutes=20),
@@ -63,7 +88,7 @@ def test_source_statuses_cover_every_source() -> None:
             ingested_last_day=340,
             stored=9000,
         ),
-        _DetectionStats(
+        DetectionStats(
             product="MODIS_NRT",
             latest_observed_at=NOW - timedelta(days=3),
             latest_ingested_at=NOW - timedelta(days=3),
@@ -73,7 +98,7 @@ def test_source_statuses_cover_every_source() -> None:
             stored=50,
         ),
     ]
-    forecast = _ForecastStats(
+    forecast = ForecastStats(
         newest=NOW - timedelta(hours=8),
         oldest=NOW - timedelta(hours=9),
         latest_stored_at=NOW - timedelta(hours=8),
@@ -95,7 +120,7 @@ def test_source_statuses_cover_every_source() -> None:
     assert statuses["VIIRS_NOAA20_NRT"].ingested_last_day == 340
     assert statuses["VIIRS_SNPP_NRT"].freshness == "no_data"
     assert statuses["VIIRS_SNPP_NRT"].stored == 0
-    assert statuses["MODIS_NRT"].freshness == "stale"
+    assert statuses["MODIS_NRT"].freshness is Freshness.STALE
     weather = statuses["open-meteo"]
     assert weather.kind == "forecast"
     assert weather.freshness == "delayed"
@@ -118,6 +143,36 @@ def test_consumer_lag_uses_beginning_when_nothing_is_committed() -> None:
         (1, None, 10),
     ]
     assert status.lag == 20
+
+
+def test_a_group_reading_several_topics_gets_a_row_per_topic() -> None:
+    detections, forecasts = (
+        TopicPartition("firms.detections", 0),
+        TopicPartition("weather.forecasts", 0),
+    )
+    rows = consumer_statuses(
+        {
+            ENRICHMENT_GROUP: CONSUMER_GROUPS[ENRICHMENT_GROUP],
+            "missing.group": ("firms.detections",),
+        },
+        described={ENRICHMENT_GROUP: GroupState("Stable", 1)},
+        committed={ENRICHMENT_GROUP: {detections: 7, forecasts: -1}},
+        assignments={"firms.detections": [detections], "weather.forecasts": [forecasts]},
+        beginning={detections: 0, forecasts: 2},
+        end={detections: 10, forecasts: 5},
+    )
+    assert [(row.group_id, row.topic, row.state, row.members, row.lag) for row in rows] == [
+        (ENRICHMENT_GROUP, "firms.detections", "Stable", 1, 3),
+        (ENRICHMENT_GROUP, "weather.forecasts", "Stable", 1, 3),
+        ("missing.group", "firms.detections", "Unknown", 0, 10),
+    ]
+    assert rows[1].partitions[0].committed is None
+
+
+def test_every_consumer_group_reads_known_topics() -> None:
+    known = {spec.name for spec in ALL_TOPICS}
+    assert all(set(topics) <= known for topics in CONSUMER_GROUPS.values())
+    assert CONSUMER_GROUPS[ENRICHMENT_GROUP] == ("firms.detections", "weather.forecasts")
 
 
 def test_messages_since_ignores_partitions_without_newer_records() -> None:
@@ -151,6 +206,7 @@ def test_dead_letter_summary_counts_by_topic_and_lists_newest_first() -> None:
     records = [letter(30, "firms.detections"), letter(5, "weather.forecasts", "late")]
     summary = summarize_dead_letters(records, retained=40, last_day=2)
     assert summary.by_topic == {"firms.detections": 1, "weather.forecasts": 1}
+    assert summary.topics == ["sink-worker.dlq", "stream-processor.dlq"]
     assert summary.sample_truncated is False
     assert [item.error for item in summary.recent] == ["late", "bad"]
     assert summary.recent[0].partition == 2
@@ -158,41 +214,76 @@ def test_dead_letter_summary_counts_by_topic_and_lists_newest_first() -> None:
     assert summarize_dead_letters(records, retained=40, last_day=9).sample_truncated is True
 
 
-def test_status_reports_each_unavailable_half(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:1/unavailable")
+def no_database(_now: datetime) -> list[SourceStatus]:
+    raise psycopg.OperationalError("connection refused")
 
-    def no_kafka(_now: datetime) -> KafkaSection:
-        raise RuntimeError("no brokers")
 
-    monkeypatch.setattr(pipeline, "collect_kafka", no_kafka)
+def no_kafka(_now: datetime) -> KafkaSection:
+    raise RuntimeError("no brokers")
+
+
+def test_status_reports_each_unavailable_half() -> None:
+    collector = PipelineStatusCollector(no_database, no_kafka, clock=lambda: NOW)
+    app.dependency_overrides[status_collector] = lambda: collector
     response = client.get("/pipeline/status")
     assert response.status_code == 200
     status = PipelineStatus.model_validate_json(response.content)
-    assert {source.freshness for source in status.sources} == {"unknown"}
-    assert status.topics is None and status.consumers is None and status.dead_letters is None
-    assert len(status.errors) == 2
+    assert status.checked_at == NOW
+    assert {source.freshness for source in status.sources} == {Freshness.UNKNOWN}
+    assert status.topics is None
+    assert status.consumers is None
+    assert status.dead_letters is None
+    assert status.errors == [POSTGIS_UNAVAILABLE, KAFKA_UNAVAILABLE]
+    # The enums serialize to the same strings the dashboard reads.
+    assert b'"freshness":"unknown"' in response.content
 
 
-def test_status_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unexpected_database_errors_are_not_swallowed() -> None:
+    def broken(_now: datetime) -> list[SourceStatus]:
+        raise TypeError("bug")
+
+    with pytest.raises(TypeError):
+        _ = PipelineStatusCollector(broken, no_kafka).collect()
+
+
+def test_status_is_cached() -> None:
     calls: list[datetime] = []
 
     def counted() -> PipelineStatus:
         calls.append(NOW)
-        return PipelineStatus(
-            checked_at=NOW, sources=[], topics=None, consumers=None, dead_letters=None, errors=[]
-        )
+        return EMPTY_STATUS
 
-    monkeypatch.setattr(pipeline, "collect_status", counted)
+    collector = PipelineStatusCollector(no_database, no_kafka)
+    collector.collect = counted
+    app.dependency_overrides[status_collector] = lambda: collector
     assert client.get("/pipeline/status").status_code == 200
     assert client.get("/pipeline/status").status_code == 200
     assert len(calls) == 1
+
+
+def test_cache_expires_after_its_ttl() -> None:
+    clock = [100.0]
+    cache = StatusCache(ttl_seconds=10, monotonic=lambda: clock[0])
+    fetches: list[int] = []
+
+    def fetch() -> PipelineStatus:
+        fetches.append(1)
+        return EMPTY_STATUS
+
+    _ = cache.get(fetch)
+    clock[0] = 109.9
+    _ = cache.get(fetch)
+    assert len(fetches) == 1
+    clock[0] = 110.0
+    _ = cache.get(fetch)
+    assert len(fetches) == 2
 
 
 @pytest.mark.skipif(
     not os.environ.get("API_TEST_DATABASE_URL"),
     reason="set API_TEST_DATABASE_URL to run PostGIS integration test",
 )
-def test_source_freshness_from_postgis(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_source_freshness_from_postgis() -> None:
     database_url = os.environ["API_TEST_DATABASE_URL"]
     schema = f"api_test_{uuid.uuid4().hex}"
     with psycopg.connect(database_url, autocommit=True) as db:
@@ -223,19 +314,16 @@ def test_source_freshness_from_postgis(monkeypatch: pytest.MonkeyPatch) -> None:
                 """
             )
             _ = db.execute("CREATE TABLE weather_hourly (valid_at timestamptz NOT NULL)")
-            monkeypatch.setenv(
-                "DATABASE_URL",
-                make_conninfo(database_url, options=f"-csearch_path={schema},public"),
+            sources = PostgisSources(
+                make_conninfo(database_url, options=f"-csearch_path={schema},public")
             )
-            statuses = {
-                status.id: status for status in pipeline.collect_sources(datetime.now(UTC))
-            }
+            statuses = {status.id: status for status in sources.read(datetime.now(UTC))}
             noaa20 = statuses["VIIRS_NOAA20_NRT"]
-            assert noaa20.freshness == "fresh"
+            assert noaa20.freshness is Freshness.FRESH
             assert (noaa20.ingested_last_hour, noaa20.ingested_last_day, noaa20.stored) == (1, 2, 2)
-            assert statuses["MODIS_NRT"].freshness == "stale"
+            assert statuses["MODIS_NRT"].freshness is Freshness.STALE
             # Empty weather tables: no forecast yet.
-            assert statuses["open-meteo"].freshness == "no_data"
+            assert statuses["open-meteo"].freshness is Freshness.NO_DATA
         finally:
             _ = db.execute(
                 sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)),

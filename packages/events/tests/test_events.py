@@ -1,5 +1,7 @@
 import struct
 from datetime import UTC, datetime, timedelta, timezone
+from enum import StrEnum
+from typing import get_args
 
 import pytest
 from pydantic import ValidationError
@@ -7,10 +9,23 @@ from pydantic import ValidationError
 from wildfire_events import schemas
 from wildfire_events.cells import cell_boundary, cells_covering, partition_cell
 from wildfire_events.codec import EventCodec, InvalidEvent
+from wildfire_events.countries import Country, CountryLiteral, selected_countries
 from wildfire_events.models import (
+    FireRisk,
     FirmsDetection,
+    FirmsProduct,
+    FirmsProductLiteral,
+    HourlyDetectionStats,
     HourlyWeather,
+    IncidentStatus,
+    IncidentStatusLiteral,
+    Instrument,
+    InstrumentLiteral,
+    RiskLevel,
+    RiskLevelLiteral,
     WeatherForecast,
+    WeatherProvider,
+    WeatherProviderLiteral,
     detection_event_id,
 )
 
@@ -19,7 +34,9 @@ OBSERVED = datetime(2026, 3, 5, 0, 7, tzinfo=UTC)
 
 def detection(**changes: object) -> FirmsDetection:
     values: dict[str, object] = {
-        "event_id": detection_event_id("VIIRS_NOAA20_NRT", "N20", OBSERVED, "0.5234", "114.1234"),
+        "event_id": detection_event_id(
+            FirmsProduct.VIIRS_NOAA20_NRT, "N20", OBSERVED, "0.5234", "114.1234"
+        ),
         "product": "VIIRS_NOAA20_NRT",
         "instrument": "VIIRS",
         "satellite": "N20",
@@ -56,13 +73,37 @@ def test_checked_in_schemas_match_models() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("literal", "enum"),
+    [
+        (InstrumentLiteral, Instrument),
+        (FirmsProductLiteral, FirmsProduct),
+        (WeatherProviderLiteral, WeatherProvider),
+        (IncidentStatusLiteral, IncidentStatus),
+        (RiskLevelLiteral, RiskLevel),
+        (CountryLiteral, Country),
+    ],
+)
+def test_wire_literals_cover_their_enums(literal: object, enum: type[StrEnum]) -> None:
+    assert set(get_args(literal)) == set(enum)
+
+
+def test_products_belong_to_their_instrument() -> None:
+    assert FirmsProduct.MODIS_NRT.instrument is Instrument.MODIS
+    assert {product.instrument for product in FirmsProduct} == set(Instrument)
+
+
 def test_event_id_is_stable_across_coordinate_formatting_and_time_zones() -> None:
     plus_seven = OBSERVED.astimezone(timezone(timedelta(hours=7)))
-    first = detection_event_id("MODIS_NRT", "Aqua", OBSERVED, "0.5234", "114.1234")
-    assert first == detection_event_id("MODIS_NRT", " Aqua", plus_seven, "0.52340", "114.12340")
-    assert first != detection_event_id("MODIS_NRT", "Terra", OBSERVED, "0.5234", "114.1234")
-    with pytest.raises(ValueError):
-        _ = detection_event_id("MODIS_NRT", "Aqua", OBSERVED, "nan", "114")
+    first = detection_event_id(FirmsProduct.MODIS_NRT, "Aqua", OBSERVED, "0.5234", "114.1234")
+    assert first == detection_event_id(
+        FirmsProduct.MODIS_NRT, " Aqua", plus_seven, "0.52340", "114.12340"
+    )
+    assert first != detection_event_id(
+        FirmsProduct.MODIS_NRT, "Terra", OBSERVED, "0.5234", "114.1234"
+    )
+    with pytest.raises(ValueError, match="not a finite number"):
+        _ = detection_event_id(FirmsProduct.MODIS_NRT, "Aqua", OBSERVED, "nan", "114")
 
 
 @pytest.mark.parametrize(
@@ -121,7 +162,7 @@ def test_codec_round_trip_uses_confluent_wire_format() -> None:
         (b"\x01\x00\x00\x00\x01{}", "magic byte"),
         (b"\x00\x00\x00\x00\x09{}", "not registered"),
         (b"\x00\x00\x00\x00\x02{}", "not registered"),
-        (b"\x00\x00\x00\x00\x01{\"event_id\": 1}", "does not match"),
+        (b'\x00\x00\x00\x00\x01{"event_id": 1}', "does not match"),
         (b"\x00\x00\x00\x00\x01not json", "does not match"),
     ],
 )
@@ -138,4 +179,56 @@ def test_region_cells_have_closed_boundaries() -> None:
     cells = cells_covering(92, -12, 156, 29)
     assert len(cells) == 385
     ring = cell_boundary(cells[0])
-    assert ring[0] == ring[-1] and len(ring) == 7
+    assert ring[0] == ring[-1]
+    assert len(ring) == 7
+
+
+def test_locates_countries_and_leaves_sea_and_other_countries_unassigned() -> None:
+    bangkok, jakarta, port_moresby = (13.756, 100.502), (-6.2, 106.85), (-9.44, 147.18)
+    south_china_sea, sydney = (12.0, 113.0), (-33.87, 151.21)
+    locator = selected_countries()
+    assert locator.locate([bangkok, south_china_sea, jakarta, sydney, port_moresby]) == [
+        Country.THA,
+        None,
+        Country.IDN,
+        None,
+        Country.PNG,
+    ]
+    assert locator.covers([bangkok, sydney]) == [True, False]
+    assert locator.locate([]) == []
+
+
+def test_fire_risk_score_is_the_sum_of_its_factors() -> None:
+    risk = FireRisk(
+        score=7,
+        level=RiskLevel.HIGH,
+        wind_points=1,
+        temperature_points=2,
+        dryness_points=3,
+        intensity_points=1,
+    )
+    assert risk.level is RiskLevel.HIGH
+    with pytest.raises(ValidationError, match="sum of the factor points"):
+        _ = FireRisk.model_validate({**risk.model_dump(), "score": 8})
+
+
+def test_hourly_stats_invariants_and_key() -> None:
+    hour = datetime(2026, 3, 5, 7, tzinfo=UTC)
+    stats = HourlyDetectionStats(
+        country=Country.IDN,
+        hour_start=hour.astimezone(timezone(timedelta(hours=7))),
+        detections=3,
+        detections_with_frp=2,
+        total_frp_mw=30.5,
+        max_frp_mw=20.0,
+    )
+    assert stats.key == "IDN|2026-03-05T07:00:00+00:00"
+    values = stats.model_dump()
+    with pytest.raises(ValidationError, match="on the hour"):
+        _ = HourlyDetectionStats.model_validate({**values, "hour_start": hour.replace(minute=5)})
+    with pytest.raises(ValidationError, match="exceeds detections"):
+        _ = HourlyDetectionStats.model_validate({**values, "detections_with_frp": 4})
+    with pytest.raises(ValidationError, match="max_frp_mw"):
+        _ = HourlyDetectionStats.model_validate(
+            {**values, "detections_with_frp": 0, "total_frp_mw": 0}
+        )

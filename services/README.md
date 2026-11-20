@@ -13,6 +13,11 @@ podman build -f services/ingestor/Containerfile .
   each FIRMS NRT product and Open-Meteo. It reads only external APIs and Kafka.
 - `sink-worker/` projects topics into PostGIS, with one consumer group per
   job, and routes invalid events to `sink-worker.dlq`.
+- `stream-processor/` runs stateful Quix Streams jobs, one process each: it
+  clusters `firms.detections` into `fire.incidents`, enriches detections with
+  country, weather, and fire risk into `detections.enriched`, and aggregates
+  hourly per-country statistics into `stats.hourly`. Invalid events go to
+  `stream-processor.dlq`.
 
 Keep HTTP API concerns in `apps/api`. See
 [the event pipeline operations guide](../docs/operations/event-pipeline.md).

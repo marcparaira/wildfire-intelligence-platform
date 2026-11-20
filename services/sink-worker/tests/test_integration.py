@@ -25,18 +25,37 @@ from psycopg.conninfo import make_conninfo
 from pydantic import BaseModel
 
 from wildfire_events.cells import partition_cell
+from wildfire_events.countries import Country
 from wildfire_events.kafka import idempotent_producer
 from wildfire_events.models import (
-    FIRMS_PRODUCTS,
+    EnrichedDetection,
+    FireIncident,
+    FireRisk,
     FirmsDetection,
     FirmsProduct,
+    HourlyDetectionStats,
     HourlyWeather,
+    IncidentDay,
+    IncidentStatus,
+    ObservedWeather,
+    RiskLevel,
     WeatherForecast,
+    WeatherProvider,
     detection_event_id,
 )
 from wildfire_events.registry import SchemaRegistry
 from wildfire_sink.detections import DetectionProjection
-from wildfire_sink.runner import DeadLetters, Projection, ProjectionWorker, record_value
+from wildfire_sink.enrichment import EnrichmentProjection
+from wildfire_sink.incidents import IncidentProjection
+from wildfire_sink.runner import (
+    DeadLetters,
+    Projection,
+    ProjectionWorker,
+    database_connection,
+    kafka_consumer,
+    record_value,
+)
+from wildfire_sink.statistics import StatisticsProjection
 from wildfire_sink.weather import WeatherProjection
 
 DATABASE_URL = os.environ.get("SINK_TEST_DATABASE_URL", "")
@@ -58,7 +77,7 @@ def detection(
     return FirmsDetection(
         event_id=detection_event_id(product, satellite, observed_at, str(latitude), str(longitude)),
         product=product,
-        instrument=FIRMS_PRODUCTS[product],
+        instrument=product.instrument,
         satellite=satellite,
         observed_at=observed_at,
         latitude=latitude,
@@ -72,11 +91,11 @@ def detection(
 
 # One fire seen by Aqua MODIS and Suomi-NPP VIIRS 4 minutes apart (~150 m apart), by
 # NOAA-20 50 minutes earlier (a separate observation), plus an unrelated detection.
-AQUA = detection("MODIS_NRT", "Aqua", 4, 0.5240, 114.1240)
-SNPP = detection("VIIRS_SNPP_NRT", "N", 0, 0.5230, 114.1230)
-SNPP_NEIGHBOR = detection("VIIRS_SNPP_NRT", "N", 0, 0.5260, 114.1230)
-NOAA20 = detection("VIIRS_NOAA20_NRT", "N20", -50, 0.5234, 114.1234)
-OTHER = detection("MODIS_NRT", "Terra", 0, 2.0, 112.0)
+AQUA = detection(FirmsProduct.MODIS_NRT, "Aqua", 4, 0.5240, 114.1240)
+SNPP = detection(FirmsProduct.VIIRS_SNPP_NRT, "N", 0, 0.5230, 114.1230)
+SNPP_NEIGHBOR = detection(FirmsProduct.VIIRS_SNPP_NRT, "N", 0, 0.5260, 114.1230)
+NOAA20 = detection(FirmsProduct.VIIRS_NOAA20_NRT, "N20", -50, 0.5234, 114.1234)
+OTHER = detection(FirmsProduct.MODIS_NRT, "Terra", 0, 2.0, 112.0)
 DETECTIONS = [AQUA, SNPP, SNPP_NEIGHBOR, NOAA20, OTHER]
 # Both Suomi-NPP pixels match Aqua with equal rank and time; the event ID breaks the tie.
 BEST_FOR_AQUA = min(SNPP.event_id, SNPP_NEIGHBOR.event_id)
@@ -156,7 +175,7 @@ def forecast(generated_hours: int, temperature: float) -> WeatherForecast:
         cell=cell,
         latitude=1,
         longitude=114,
-        provider="open-meteo",
+        provider=WeatherProvider.OPEN_METEO,
         model="best_match",
         generated_at=generated_at,
         hourly=[
@@ -183,11 +202,135 @@ def test_weather_keeps_only_the_newest_forecast_per_cell(schema_url: str) -> Non
             + "FROM weather_hourly h JOIN weather_cells c USING (cell) ORDER BY h.valid_at"
         ).fetchall()
     assert [row[1] for row in rows] == [30.0, 30.0, 30.0]
-    assert rows[0][0] == newer.generated_at and rows[0][2] == 7
+    assert rows[0][0] == newer.generated_at
+    assert rows[0][2] == 7
 
     project(schema_url, projection, [(record(key=newer.cell.encode()), None)])
     with psycopg.connect(schema_url) as connection:
         assert connection.execute("SELECT count(*) FROM weather_hourly").fetchone() == (0,)
+
+
+def incident(revision: int, status: IncidentStatus, detections: int) -> FireIncident:
+    return FireIncident(
+        incident_id=uuid.UUID("2f0b6c1e-8a51-4a43-9d59-6a3c1a7b9e01"),
+        revision=revision,
+        status=status,
+        previous_status=None if revision == 1 else IncidentStatus.NEW,
+        h3_cell=AQUA.h3_cell,
+        first_observed_at=T0,
+        last_observed_at=T0 + timedelta(hours=revision),
+        updated_at=T0 + timedelta(hours=revision),
+        detection_count=detections,
+        footprint_cells=detections,
+        footprint_km2=5.2 * detections,
+        latitude=0.524,
+        longitude=114.124,
+        west=114.12,
+        south=0.52,
+        east=114.13,
+        north=0.53,
+        max_frp_mw=10.0,
+        total_frp_mw=10.0 * detections,
+        products=[FirmsProduct.MODIS_NRT, FirmsProduct.VIIRS_SNPP_NRT],
+        daily=[IncidentDay(day=T0.date(), detections=detections, new_cells=detections)],
+    )
+
+
+@needs_database
+def test_incidents_keep_the_newest_revision_and_honour_tombstones(schema_url: str) -> None:
+    projection = IncidentProjection(SchemaRegistry("http://unused"))
+    second = incident(2, IncidentStatus.GROWING, 3)
+    project(schema_url, projection, [(record(), incident(1, IncidentStatus.NEW, 1))])
+    project(
+        schema_url, projection, [(record(), second), (record(), incident(1, IncidentStatus.NEW, 1))]
+    )
+    with psycopg.connect(schema_url) as connection:
+        row = connection.execute(
+            "SELECT revision, status, previous_status, detection_count, products, daily, "
+            + "ST_X(location), ST_SRID(location) FROM fire_incidents"
+        ).fetchone()
+    assert row == (
+        2,
+        "growing",
+        "new",
+        3,
+        ["MODIS_NRT", "VIIRS_SNPP_NRT"],
+        [{"day": "2026-03-05", "detections": 3, "new_cells": 3, "max_frp_mw": None}],
+        114.124,
+        4326,
+    )
+
+    key = str(second.incident_id).encode()
+    project(schema_url, projection, [(record(key=b"not-a-uuid"), None)])  # ignored
+    with psycopg.connect(schema_url) as connection:
+        assert connection.execute("SELECT count(*) FROM fire_incidents").fetchone() == (1,)
+    project(schema_url, projection, [(record(key=key), None)])
+    with psycopg.connect(schema_url) as connection:
+        assert connection.execute("SELECT count(*) FROM fire_incidents").fetchone() == (0,)
+
+
+@needs_database
+def test_enrichment_upserts_conditions_per_detection(schema_url: str) -> None:
+    projection = EnrichmentProjection(SchemaRegistry("http://unused"))
+    weather = ObservedWeather(
+        valid_at=T0.replace(minute=0),
+        forecast_generated_at=T0 - timedelta(hours=3),
+        temperature_c=31.0,
+        precipitation_mm=0.0,
+        precipitation_24h_mm=0.0,
+        wind_speed_kmh=8.0,
+        wind_direction_degrees=180.0,
+    )
+    risk = FireRisk(
+        score=5,
+        level=RiskLevel.MODERATE,
+        wind_points=0,
+        temperature_points=2,
+        dryness_points=3,
+        intensity_points=0,
+    )
+    bare = EnrichedDetection(detection=AQUA, country=None, weather=None, risk=None)
+    enriched = EnrichedDetection(detection=AQUA, country=Country.IDN, weather=weather, risk=risk)
+    other = EnrichedDetection(detection=OTHER, country=Country.MYS, weather=None, risk=None)
+    project(schema_url, projection, [(record(), bare), (record(), other)])
+    project(schema_url, projection, [(record(), enriched)])  # later enrichment replaces
+    with psycopg.connect(schema_url) as connection:
+        rows = connection.execute(
+            "SELECT event_id, country, temperature_c, risk_score, risk_level, dryness_points "
+            + "FROM detection_conditions ORDER BY country"
+        ).fetchall()
+    assert rows == [
+        (AQUA.event_id, "IDN", 31.0, 5, "moderate", 3),
+        (OTHER.event_id, "MYS", None, None, None, None),
+    ]
+
+
+@needs_database
+def test_hourly_statistics_upsert_and_tombstones(schema_url: str) -> None:
+    projection = StatisticsProjection(SchemaRegistry("http://unused"))
+    hour = T0.replace(minute=0)
+
+    def stats(detections: int, with_frp: int) -> HourlyDetectionStats:
+        return HourlyDetectionStats(
+            country=Country.IDN,
+            hour_start=hour,
+            detections=detections,
+            detections_with_frp=with_frp,
+            total_frp_mw=12.5 * with_frp,
+            max_frp_mw=12.5 if with_frp else None,
+        )
+
+    project(schema_url, projection, [(record(), stats(1, 0)), (record(), stats(3, 2))])
+    with psycopg.connect(schema_url) as connection:
+        rows = connection.execute(
+            "SELECT country, hour_start, detections, detections_with_frp, total_frp_mw, "
+            + "max_frp_mw FROM detection_stats_hourly"
+        ).fetchall()
+    assert rows == [("IDN", hour, 3, 2, 25.0, 12.5)]
+
+    project(schema_url, projection, [(record(key=stats(3, 2).key.encode()), None)])
+    with psycopg.connect(schema_url) as connection:
+        assert connection.execute("SELECT count(*) FROM detection_stats_hourly").fetchone() == (0,)
 
 
 def _delete_subject(subject: str) -> None:
@@ -224,7 +367,11 @@ def test_events_flow_from_kafka_to_postgis_with_dead_letters_and_replay(schema_u
             worker_projection = DetectionProjection(registry, topic=topic, group_id=group_id)
             stop = Event()
             worker = ProjectionWorker(
-                worker_projection, KAFKA, schema_url, DeadLetters(producer, dlq), stop
+                worker_projection,
+                open_consumer=lambda: kafka_consumer(KAFKA, worker_projection),
+                connect=lambda: database_connection(schema_url),
+                dead_letters=DeadLetters(producer, dlq),
+                stop=stop,
             )
             thread = Thread(target=worker.run_until_stopped)
             thread.start()
@@ -243,10 +390,12 @@ def test_events_flow_from_kafka_to_postgis_with_dead_letters_and_replay(schema_u
 
         run(f"sink-test-{suffix}")
         first = duplicates(schema_url)
-        assert len(first) == 5 and first[AQUA.event_id] == BEST_FOR_AQUA
+        assert len(first) == 5
+        assert first[AQUA.event_id] == BEST_FOR_AQUA
 
-        consumer = KafkaConsumer(dlq, bootstrap_servers=KAFKA, auto_offset_reset="earliest",
-                                 consumer_timeout_ms=10000)
+        consumer = KafkaConsumer(
+            dlq, bootstrap_servers=KAFKA, auto_offset_reset="earliest", consumer_timeout_ms=10000
+        )
         dead = [next(consumer), next(consumer)]
         consumer.close()
         headers = [dict(dead_record.headers) for dead_record in dead]

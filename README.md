@@ -9,74 +9,138 @@ Asia and Papua New Guinea, built on a Kafka event pipeline.
 
 Kafka is the system of record. The ingestor publishes every observation and
 forecast as a schema-validated event. The sink worker projects the topics into
-PostGIS, and the projections can be rebuilt by replaying the log. The API
-serves queries from PostGIS and streams new detections from Kafka to the
-browser.
+PostGIS, and the projections can be rebuilt by replaying the log. The stream
+processor clusters detections into fire incidents, enriches each detection
+with its country, the forecast weather at observation time, and a fire risk
+indicator, and aggregates hourly per-country statistics. The API serves
+queries from PostGIS and streams new detections from Kafka to the browser.
 
 ```mermaid
 flowchart LR
-    SRC["External sources<br/>NASA FIRMS, Open-Meteo"]
-    SRC_P["Planned sources<br/>OpenAQ, Himawari"]
+    %% External Sources (Implemented)
+    FIRMS["NASA FIRMS API<br/>(Fire detections)"]
+    METEO["Open-Meteo API<br/>(Weather forecasts)"]
 
-    ING["Ingestor<br/>Scheduled producers"]
+    %% External Sources (Planned)
+    OPENAQ["OpenAQ API<br/>(Air quality)"]
+    HIMAWARI["Himawari-8<br/>(Satellite imagery)"]
 
+    %% Ingestor Service
+    ING["Ingestor Service"]
+
+    %% Apache Kafka (Compact)
     subgraph KAFKA["Apache Kafka + Schema Registry"]
-        direction TB
-        T_SRC["Source topics"]
-        T_DLQ["Dead-letter topics"]
-        T_USER["User topics"]
-        T_DER["Derived topics"]
+        T_SRC["Source Topics<br/>(firms.detections,<br/>weather.forecasts)"]
+        T_DER["Derived Topics<br/>(detections.enriched,<br/>fire.incidents,<br/>stats.hourly)"]
+        T_USER["User Topics"]
+        T_DLQ["Dead-Letter Topics"]
     end
 
-    STREAM["Stream processor<br/>Enrichment, incidents,<br/>statistics, alert matching"]
-
-    subgraph WORKER["Sink worker"]
-        direction TB
-        W_DB["PostGIS projections"]
-        W_S3["S3 archiver"]
-        W_ALERT["Alert notifier"]
+    %% Stream Processor Service
+    subgraph STREAM["Stream Processor"]
+        S_ENRICH["Enrichment<br/>(weather + risk)"]
+        S_INC["Incidents<br/>(clustering)"]
+        S_STATS["Statistics<br/>(hourly aggregation)"]
     end
 
+    %% Sink Worker Service
+    subgraph WORKER["Sink Worker"]
+        W_DB["PostGIS Projector"]
+        W_S3["S3 Archiver"]
+        W_ALERT["Alert Notifier"]
+    end
+
+    %% Data Storage & Destinations
     DB[("PostgreSQL<br/>+ PostGIS")]
-    S3[("Amazon S3<br/>Event archive")]
-    NOTIFY["Email / webhook"]
+    S3[("Amazon S3")]
+    EMAIL["Email"]
+    WEBHOOK["Webhooks"]
 
-    API["FastAPI<br/>REST + SSE"]
-    UI["React + OpenLayers<br/>dashboard"]
+    %% API & Frontend
+    API["API Server<br/>(FastAPI)"]
+    UI["Web Dashboard<br/>(React)"]
 
-    SRC --> ING
-    SRC_P -.-> ING
+    %% Main flows: Sources to Ingestor
+    FIRMS --> ING
+    METEO --> ING
+    OPENAQ -.-> ING
+    HIMAWARI -.-> ING
+
+    %% Ingestor to Kafka Source Topics
     ING --> T_SRC
-    T_SRC --> W_DB --> DB
-    W_DB -->|invalid events| T_DLQ
-    T_SRC -->|live detections| API
-    API -->|queries| DB
-    UI <-->|HTTPS + SSE| API
 
-    T_SRC & T_USER -.-> STREAM
-    STREAM -.-> T_DER
-    T_DER -.->|incidents, alerts| API
+    %% Stream Processor: Source Topics to Jobs (both Enrichment and Incidents in parallel)
+    T_SRC --> S_ENRICH
+    T_SRC --> S_INC
+
+    %% Stream Processor: Enrichment output to Derived Topics
+    S_ENRICH --> T_DER
+
+    %% Stream Processor: Incidents output to Derived Topics
+    S_INC --> T_DER
+
+    %% Stream Processor: Statistics reads from Derived (Enriched), outputs to Derived
+    T_DER --> S_STATS
+    S_STATS --> T_DER
+
+    %% Error handling
+    S_ENRICH -->|invalid| T_DLQ
+    S_INC -->|invalid| T_DLQ
+    S_STATS -->|invalid| T_DLQ
+
+    %% Sink Worker: Derived Topics to Storage
+    T_DER --> W_DB
+    T_DER --> W_S3
+    T_DER --> W_ALERT
+
+    %% Storage destinations
+    W_DB --> DB
+    W_S3 -.-> S3
+    W_ALERT -.-> EMAIL
+    W_ALERT -.-> WEBHOOK
+
+    %% API: Database and Kafka
+    DB --> API
+    T_SRC -->|live| API
+
+    %% Planned: User topics and alerts
     API -.->|user actions| T_USER
-    T_DER -.-> W_ALERT -.-> NOTIFY
-    T_SRC -.-> W_S3 -.-> S3
+    T_DER -.->|alerts| API
 
-    classDef external fill:#e0f2fe,stroke:#0284c7,color:#075985
-    classDef streaming fill:#fef3c7,stroke:#d97706,color:#92400e
-    classDef data fill:#dcfce7,stroke:#16a34a,color:#166534
-    classDef planned fill:#f8fafc,stroke:#94a3b8,stroke-dasharray:5 4,color:#64748b
+    %% Frontend
+    API <-->|HTTPS + SSE| UI
 
-    class SRC external
-    class T_SRC,T_DLQ streaming
-    class DB data
-    class SRC_P,T_USER,T_DER,STREAM,W_S3,W_ALERT,S3,NOTIFY planned
-    style KAFKA fill:#fffbeb,stroke:#d97706,color:#92400e
-    style WORKER fill:#f8fafc,stroke:#64748b
+    %% Styling
+    classDef done fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#166534
+    classDef planned fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,stroke-dasharray:5 4,color:#64748b
+    classDef external fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#075985
+    classDef streaming fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#92400e
+    classDef storage fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+
+    class FIRMS,METEO external
+    class ING done
+    class T_SRC,T_DER,T_DLQ streaming
+    class DB storage
+    class S_ENRICH,S_INC,S_STATS done
+    class W_DB done
+    class API,UI done
+
+    class OPENAQ,HIMAWARI planned
+    class T_USER planned
+    class S_ALERT planned
+    class S3,EMAIL,WEBHOOK planned
+    class W_S3,W_ALERT planned
+
+    style KAFKA fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#92400e
+    style STREAM fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,color:#075985
+    style WORKER fill:#faf5ff,stroke:#a855f7,stroke-width:2px,color:#581c87
 ```
 
-⟲ marks a compacted topic. Arrows show the direction data flows.
+Solid lines and boxes show implemented features; dotted lines and dashed boxes show planned features.
 
 The [target architecture](docs/architecture/high-level-architecture.md) adds
-stream processing, watch areas, and alerting; see the [roadmap](docs/roadmap.md).
+watch areas, alerting, and the archive; see the
+[roadmap](docs/roadmap.md).
 The [event pipeline guide](docs/operations/event-pipeline.md) covers topics,
 schemas, dead letters, and replaying the log.
 
@@ -86,6 +150,7 @@ apps/web/              React + TypeScript + OpenLayers dashboard
 packages/events/       Shared topics, H3 keys, event models, schemas, and codec
 services/ingestor/     Scheduled FIRMS and Open-Meteo producers
 services/sink-worker/  Kafka-to-PostGIS projections and dead-letter routing
+services/stream-processor/  Quix Streams jobs: incidents, enrichment and risk, hourly statistics
 infra/compose/         Local PostgreSQL/PostGIS initialization
 docs/                  Requirements, architecture, operations, and roadmap
 ```
@@ -179,26 +244,46 @@ podman compose exec -T ingestor python -m wildfire_ingestor.firms \
   --product VIIRS_NOAA20_NRT --csv - < services/ingestor/tests/fixtures/viirs_noaa20.csv
 ```
 
+## Fire incidents
+
+The stream processor groups detections that are within about 2.5–4 km
+(neighbouring resolution-7 H3 cells) and 48 hours of each other into
+incidents, and publishes a new revision to `fire.incidents` whenever one
+changes. Each incident is `new` for its first 24 hours, then `growing` while
+it gains area or `stable` when it stops; it becomes `inactive` after 48 hours
+without detections, or `merged` when it joins an older incident. Revisions
+carry the footprint, FRP totals, bounding box, and daily growth history.
+
+The dashboard lists active incidents for the selected area and draws them on
+the map, coloured by status. Selecting one shows its growth over time (daily
+detections and cumulative footprint) and the forecast for its area over the
+next 24 hours. Each detection's details show its country, the forecast weather
+at observation time, and a simple fire risk indicator (low to extreme) scored
+from wind, temperature, 24-hour rainfall, and fire radiative power. The API
+also serves hourly per-country detection and FRP statistics at
+`/api/stats/hourly`. See the
+[event pipeline guide](docs/operations/event-pipeline.md#stream-processor) for
+the rules and how to reprocess.
+
 ## Development
 
-Requires Node.js 22+, Python 3.12+, [uv](https://docs.astral.sh/uv/), and
-[basedpyright](https://docs.basedpyright.com/) (`uv tool install basedpyright`).
+Requires Node.js 22+, Python 3.12+, and [uv](https://docs.astral.sh/uv/).
+Python code follows the [Python coding standard](docs/python-coding-principles.md).
 
 ```sh
 # Web
 cd apps/web && npm ci && npm run lint && npm test && npm run build && cd ../..
 
-# Python (one .venv at the root for every project)
+# Python (one .venv at the root for every project; same commands as CI)
 uv sync
+uv run ruff format --check .
 uv run ruff check .
-basedpyright
-for project in apps/api packages/events services/ingestor services/sink-worker; do
-  uv run pytest "$project/tests"
-done
+uv run basedpyright
+uv run pytest
 ```
 
-Run each project's tests separately, because test module names repeat across
-projects. After changing an event model, run
+Ruff, basedpyright, and pytest are pinned in the root `pyproject.toml` and
+configured only there. After changing an event model, run
 `uv run python -m wildfire_events.schemas` and commit the regenerated schema.
 
 **Integration tests** run against the local stack when these variables are
@@ -209,6 +294,7 @@ set. Each test creates and removes its own schemas, topics, and subjects.
 | API | `API_TEST_DATABASE_URL` |
 | Ingestor | `INGESTOR_TEST_KAFKA`, `INGESTOR_TEST_SCHEMA_REGISTRY` |
 | Sink worker | `SINK_TEST_DATABASE_URL`, `SINK_TEST_KAFKA`, `SINK_TEST_SCHEMA_REGISTRY` |
+| Stream processor | `PROCESSOR_TEST_KAFKA`, `PROCESSOR_TEST_SCHEMA_REGISTRY` |
 
 Use `postgresql://wildfire:wildfire_dev@localhost:55432/wildfire`,
 `localhost:19092`, and `http://localhost:18081`.
@@ -216,6 +302,10 @@ Use `postgresql://wildfire:wildfire_dev@localhost:55432/wildfire`,
 **Running outside containers:** start the dependencies with
 `podman compose up -d db kafka schema-registry`, then run
 `uv run uvicorn wildfire_api.main:app --reload` from the root and `npm run dev`
-in `apps/web`. Vite proxies `/api` to port 8000. The ingestor and sink worker
-run with `uv run python -m wildfire_ingestor` and
-`uv run python -m wildfire_sink`.
+in `apps/web`. Vite proxies `/api` to port 8000. The ingestor, sink worker,
+and stream processor run with `uv run python -m wildfire_ingestor`,
+`uv run python -m wildfire_sink`, and `uv run python -m wildfire_processor`.
+
+The stream processor pins `pydantic<2.14` through Quix Streams. The uv
+workspace shares one resolution, so every project gets that version locally;
+container images and CI install each service separately.

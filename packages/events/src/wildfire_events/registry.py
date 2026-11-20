@@ -103,9 +103,7 @@ class SchemaRegistry:
             if schema_id in self._subjects_by_id:
                 return self._subjects_by_id[schema_id]
         try:
-            versions = self._request(
-                "GET", f"/schemas/ids/{schema_id}/versions", _SUBJECT_VERSIONS
-            )
+            versions = self._request("GET", f"/schemas/ids/{schema_id}/versions", _SUBJECT_VERSIONS)
             subjects = frozenset(version.subject for version in versions)
         except HTTPError as exc:
             if exc.code != 404:
@@ -119,9 +117,10 @@ class SchemaRegistry:
         for attempt in range(1, attempts + 1):
             try:
                 _ = self._request("GET", "/subjects", _ANY_JSON)
-                return
             except RegistryUnavailable as exc:
                 if attempt == attempts:
                     raise
                 LOGGER.warning("Schema registry unavailable; retrying in %ss: %s", delay, exc)
                 time.sleep(delay)
+            else:
+                return

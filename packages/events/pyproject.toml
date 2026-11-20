@@ -10,27 +10,13 @@ requires-python = ">=3.12"
 dependencies = [
     "h3>=4.2,<5",
     "kafka-python>=2.2,<3",
+    "numpy>=2,<3",
     "pydantic>=2.10,<3",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.3,<9",
-    "ruff>=0.9,<1",
+    "shapely>=2.0,<3",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-wildfire_events = ["schemas/*.json"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py312"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+wildfire_events = ["schemas/*.json", "data/*.geojson"]

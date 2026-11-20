@@ -7,13 +7,15 @@ only reads them and never calls the provider.
 
 import logging
 from datetime import UTC, datetime
-from typing import Annotated, LiteralString
+from typing import LiteralString
 
 import psycopg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
+from wildfire_api.bounds import Bounds, BoundsDep
 from wildfire_api.db import connect, fetch_all
+from wildfire_api.settings import SettingsDep
 
 LOGGER = logging.getLogger(__name__)
 router = APIRouter(tags=["weather"])
@@ -77,81 +79,68 @@ class WeatherForecast(BaseModel):
     items: list[WeatherPoint]
 
 
-@router.get("/weather/forecast", response_model=WeatherForecast)
-def weather_forecast(
-    west: Annotated[float | None, Query(ge=-180, le=180)] = None,
-    south: Annotated[float | None, Query(ge=-90, le=90)] = None,
-    east: Annotated[float | None, Query(ge=-180, le=180)] = None,
-    north: Annotated[float | None, Query(ge=-90, le=90)] = None,
-    at: datetime | None = None,
+class ForecastUnavailable(LookupError):
+    """No forecast has been ingested yet."""
+
+
+class ForecastTimeUnavailable(LookupError):
+    """The requested valid time is not in the stored forecast."""
+
+
+def select_forecast_time(times: list[datetime], at: datetime | None, now: datetime) -> datetime:
+    """The requested time, or by default the first forecast hour not in the past."""
+    if at is None:
+        return next((value for value in times if value >= now), times[-1])
+    selected = at.astimezone(UTC)
+    if selected not in times:
+        raise ForecastTimeUnavailable(selected)
+    return selected
+
+
+def load_forecast(
+    connection: psycopg.Connection, bounds: Bounds | None, at: datetime | None, now: datetime
 ) -> WeatherForecast:
-    """Hourly forecast for one valid time over the H3 forecast grid.
+    """One forecast hour over the cells that intersect ``bounds``.
 
-    ``generated_at`` is when the newest cell forecast was retrieved from Open-Meteo,
-    and ``oldest_generated_at`` the oldest, so clients can show forecast freshness.
+    Raises ``ForecastUnavailable`` before the first forecast is stored and
+    ``ForecastTimeUnavailable`` when ``at`` is not a stored valid time.
     """
-    bounds = (west, south, east, north)
-    if any(value is not None for value in bounds):
-        if west is None or south is None or east is None or north is None:
-            raise HTTPException(422, "All four geographic bounds are required")
-        if west >= east or south >= north:
-            raise HTTPException(422, "West must be less than east and south less than north")
-    if at is not None and at.tzinfo is None:
-        raise HTTPException(422, "Forecast time must include a timezone")
+    times = [
+        row.valid_at
+        for row in fetch_all(
+            connection,
+            _ValidTime,
+            "SELECT DISTINCT valid_at FROM weather_hourly ORDER BY valid_at",
+        )
+    ]
+    if not times:
+        raise ForecastUnavailable
+    selected_at = select_forecast_time(times, at, now)
 
-    try:
-        with connect() as connection:
-            times = [
-                row.valid_at
-                for row in fetch_all(
-                    connection,
-                    _ValidTime,
-                    "SELECT DISTINCT valid_at FROM weather_hourly ORDER BY valid_at",
-                )
-            ]
-            if not times:
-                raise HTTPException(503, "No weather forecast has been ingested yet")
-
-            now = datetime.now(UTC)
-            selected_at = (
-                at.astimezone(UTC)
-                if at is not None
-                else next((value for value in times if value >= now), times[-1])
-            )
-            if selected_at not in times:
-                raise HTTPException(422, "Forecast time is not available")
-
-            clauses: list[LiteralString] = ["h.valid_at = %s"]
-            parameters: list[object] = [selected_at]
-            if west is not None and south is not None and east is not None and north is not None:
-                clauses.append("c.boundary && ST_MakeEnvelope(%s, %s, %s, %s, 4326)")
-                parameters.extend((west, south, east, north))
-            rows = fetch_all(
-                connection,
-                _CellRow,
-                f"""
-                SELECT c.cell, c.latitude, c.longitude, ST_AsGeoJSON(c.boundary) AS boundary,
-                       c.generated_at, h.temperature_c, h.precipitation_mm, h.wind_speed_kmh,
-                       h.wind_direction_degrees
-                FROM weather_hourly AS h JOIN weather_cells AS c USING (cell)
-                WHERE {" AND ".join(clauses)}
-                ORDER BY c.latitude, c.longitude
-                """,
-                parameters,
-            )
-            # weather_hourly references weather_cells, so a forecast time implies cells.
-            [freshness] = fetch_all(
-                connection,
-                _Freshness,
-                "SELECT max(generated_at) AS newest, min(generated_at) AS oldest "
-                + "FROM weather_cells",
-            )
-    except HTTPException:
-        raise
-    except psycopg.Error as exc:
-        LOGGER.exception("Unable to query stored weather forecasts")
-        raise HTTPException(503, "Weather data is currently unavailable") from exc
-
+    clauses: list[LiteralString] = ["h.valid_at = %s"]
+    parameters: list[object] = [selected_at]
+    if bounds is not None:
+        clauses.append("c.boundary && ST_MakeEnvelope(%s, %s, %s, %s, 4326)")
+        parameters.extend((bounds.west, bounds.south, bounds.east, bounds.north))
+    rows = fetch_all(
+        connection,
+        _CellRow,
+        f"""
+        SELECT c.cell, c.latitude, c.longitude, ST_AsGeoJSON(c.boundary) AS boundary,
+               c.generated_at, h.temperature_c, h.precipitation_mm, h.wind_speed_kmh,
+               h.wind_direction_degrees
+        FROM weather_hourly AS h JOIN weather_cells AS c USING (cell)
+        WHERE {" AND ".join(clauses)}
+        ORDER BY c.latitude, c.longitude
+        """,
+        parameters,
+    )
+    # weather_hourly references weather_cells, so a forecast time implies cells.
+    [freshness] = fetch_all(
+        connection,
+        _Freshness,
+        "SELECT max(generated_at) AS newest, min(generated_at) AS oldest FROM weather_cells",
+    )
     return WeatherForecast(
         generated_at=freshness.newest,
         oldest_generated_at=freshness.oldest,
@@ -159,3 +148,34 @@ def weather_forecast(
         times=times,
         items=[row.point() for row in rows],
     )
+
+
+@router.get("/weather/forecast", response_model=WeatherForecast)
+def weather_forecast(
+    settings: SettingsDep, bounds: BoundsDep, at: datetime | None = None
+) -> WeatherForecast:
+    """Hourly forecast for one valid time over the H3 forecast grid.
+
+    ``generated_at`` is when the newest cell forecast was retrieved from Open-Meteo,
+    and ``oldest_generated_at`` the oldest, so clients can show forecast freshness.
+    """
+    if at is not None and at.tzinfo is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Forecast time must include a timezone"
+        )
+    try:
+        with connect(settings.database_url) as connection:
+            return load_forecast(connection, bounds, at, datetime.now(UTC))
+    except ForecastUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "No weather forecast has been ingested yet"
+        ) from exc
+    except ForecastTimeUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Forecast time is not available"
+        ) from exc
+    except psycopg.Error as exc:
+        LOGGER.exception("Unable to query stored weather forecasts")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Weather data is currently unavailable"
+        ) from exc

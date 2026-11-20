@@ -1,6 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import type { IncidentDetailState, IncidentSummary, IncidentsState } from "./incidents";
+import { enrichedHotspot, incidentDetail, incidentSummary } from "./test-fixtures";
 import type { Bounds, Hotspot } from "./hotspots";
 import type { PipelineState } from "./pipeline";
 import type { WeatherPoint } from "./weather";
@@ -8,19 +10,32 @@ import type { WeatherPoint } from "./weather";
 const pipelineState = vi.hoisted(() => ({ current: { status: null, error: "", loading: true } as PipelineState }));
 
 // The pipeline status poll has its own tests; keep it out of the fetch call counts here.
+const incidentState = vi.hoisted(() => ({ current: { items: [], truncated: false, loading: false, error: "" } as IncidentsState }));
+const incidentDetailState = vi.hoisted(() => ({ current: { incident: null, loading: false, error: "" } as IncidentDetailState }));
+// Incidents have their own tests; keep their requests out of the fetch call counts here.
+vi.mock("./incidents", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./incidents")>(),
+  useIncidents: () => incidentState.current,
+  useIncidentDetail: () => incidentDetailState.current,
+}));
+
 vi.mock("./pipeline", async (importOriginal) => ({
   ...await importOriginal<typeof import("./pipeline")>(),
   usePipelineStatus: () => pipelineState.current,
 }));
 
 vi.mock("./MapView", () => ({
-  default: ({ hotspots, weatherPoints, weatherMetric, bounds, areaBounds, onSelect }: {
+  default: ({ hotspots, weatherPoints, weatherMetric, bounds, areaBounds, onSelect, incidents = [], selectedIncidentId = null, onSelectIncident, focusBounds = null }: {
     hotspots: Hotspot[];
     weatherPoints: WeatherPoint[];
     weatherMetric: string;
     bounds: Bounds;
     areaBounds: Bounds | null;
     onSelect: (eventId: string) => void;
+    incidents?: IncidentSummary[];
+    selectedIncidentId?: string | null;
+    onSelectIncident?: (incidentId: string) => void;
+    focusBounds?: Bounds | null;
   }) => (
     <div
       aria-label="Hotspot map"
@@ -28,9 +43,15 @@ vi.mock("./MapView", () => ({
       data-area-bounds={areaBounds?.join(",") ?? ""}
       data-weather-count={weatherPoints.length}
       data-weather-metric={weatherMetric}
+      data-incident-count={incidents.length}
+      data-selected-incident={selectedIncidentId ?? ""}
+      data-focus-bounds={focusBounds?.join(",") ?? ""}
     >
       {hotspots.map((hotspot) => (
         <button key={hotspot.event_id} onClick={() => onSelect(hotspot.event_id)}>Map point {hotspot.id ?? hotspot.event_id}</button>
+      ))}
+      {incidents.map((incident) => (
+        <button key={incident.incident_id} onClick={() => onSelectIncident?.(incident.incident_id)}>Map incident {incident.incident_id.slice(0, 8)}</button>
       ))}
     </div>
   ),
@@ -51,6 +72,8 @@ const observation: Hotspot = {
 
 afterEach(() => {
   cleanup();
+  incidentState.current = { items: [], truncated: false, loading: false, error: "" };
+  incidentDetailState.current = { incident: null, loading: false, error: "" };
   window.location.hash = "";
   pipelineState.current = { status: null, error: "", loading: true };
   vi.unstubAllGlobals();
@@ -184,7 +207,7 @@ describe("hotspot dashboard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh data" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(screen.getByText(/Select a point on the map/)).toBeInTheDocument();
+    expect(screen.getByText(/Select a point or incident on the map/)).toBeInTheDocument();
   });
 
   it("explains the scale and displays zero and unavailable FRP correctly", async () => {
@@ -317,5 +340,64 @@ describe("hotspot dashboard", () => {
     expect(screen.getByRole("link", { name: "Pipeline status" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText(/Kafka is unavailable/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Hotspot map")).not.toBeInTheDocument();
+  });
+
+  it("selects incidents from the list or the map, one detail panel at a time", async () => {
+    const incident = incidentSummary();
+    incidentState.current = { items: [incident], truncated: false, loading: false, error: "" };
+    incidentDetailState.current = { incident: incidentDetail(), loading: false, error: "" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ items: [observation], truncated: false }) }));
+    render(<App />);
+    await screen.findByText("0.523°, 114.123°");
+    const map = screen.getByLabelText("Hotspot map");
+    expect(map).toHaveAttribute("data-incident-count", "1");
+    expect(screen.getByText("Incidents", { selector: ".incident-legend span" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Map point 7" }));
+    expect(screen.getByRole("heading", { name: "Detection details" })).toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByRole("region", { name: "Fire incidents" })).getByRole("button", { name: /Growing/ }));
+    expect(screen.getByRole("heading", { name: "Incident details" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Growth over time/ })).toBeInTheDocument();
+    expect(screen.queryByText("12.5 MW")).not.toBeInTheDocument();
+    expect(map).toHaveAttribute("data-selected-incident", incident.incident_id);
+    expect(map).toHaveAttribute("data-focus-bounds", incident.bbox.join(","));
+
+    fireEvent.click(screen.getByRole("button", { name: /0.523°, 114.123°/ }));
+    expect(screen.getByRole("heading", { name: "Detection details" })).toBeInTheDocument();
+    expect(map).toHaveAttribute("data-selected-incident", "");
+
+    fireEvent.click(screen.getByRole("button", { name: "Map incident 0b6f3a52" }));
+    expect(screen.getByRole("heading", { name: "Incident details" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { pressed: true, name: /0.523°/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Show incidents on map"));
+    expect(map).toHaveAttribute("data-incident-count", "0");
+  });
+
+  it("shows the country, fire risk, and weather of an enriched detection", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ items: [enrichedHotspot()], truncated: false }) }));
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Map point 7" }));
+    expect(screen.getByText("Indonesia")).toBeInTheDocument();
+    const conditions = within(screen.getByLabelText("Conditions at observation"));
+    expect(conditions.getByText("High · 7/12")).toBeInTheDocument();
+    expect(conditions.getByText("Wind 1 · Heat 2 · Dryness 3 · Intensity 1")).toBeInTheDocument();
+    expect(conditions.getByText("31.4 °C")).toBeInTheDocument();
+    expect(conditions.getByText("12 km/h from E")).toBeInTheDocument();
+    expect(conditions.getByText("0.1 mm")).toBeInTheDocument();
+    expect(conditions.getByText("2026-03-05 00:00 UTC")).toBeInTheDocument();
+  });
+
+  it.each([
+    [enrichedHotspot({ risk: null, weather: null }), "No forecast covered this observation"],
+    [enrichedHotspot({ id: null, country: null, risk: null, weather: null }), "appear once the detection has been processed"],
+    [{ ...observation }, "appear once the detection has been processed"],
+  ])("explains missing conditions (%#)", async (hotspot, message) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ items: [hotspot], truncated: false }) }));
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: `Map point ${hotspot.id ?? hotspot.event_id}` }));
+    expect(screen.getByText(new RegExp(message))).toBeInTheDocument();
+    expect(screen.queryByText("Fire risk")).not.toBeInTheDocument();
   });
 });

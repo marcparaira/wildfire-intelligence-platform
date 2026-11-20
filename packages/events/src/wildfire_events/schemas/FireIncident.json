@@ -1,0 +1,243 @@
+{
+  "$defs": {
+    "IncidentDay": {
+      "additionalProperties": false,
+      "description": "One UTC day of an incident's activity.",
+      "properties": {
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "detections": {
+          "minimum": 0,
+          "title": "Detections",
+          "type": "integer"
+        },
+        "max_frp_mw": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Frp Mw"
+        },
+        "new_cells": {
+          "description": "Footprint cells first detected on this day",
+          "minimum": 0,
+          "title": "New Cells",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "day",
+        "detections",
+        "new_cells"
+      ],
+      "title": "IncidentDay",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Latest state of a fire incident: detections clustered by space and time.\n\nEach change produces a new revision under the incident ID (the Kafka key).\n``merged`` and ``inactive`` are final: an incident in either state never\nchanges again.",
+  "properties": {
+    "daily": {
+      "description": "Activity per UTC day, oldest first",
+      "items": {
+        "$ref": "#/$defs/IncidentDay"
+      },
+      "title": "Daily",
+      "type": "array"
+    },
+    "detection_count": {
+      "minimum": 1,
+      "title": "Detection Count",
+      "type": "integer"
+    },
+    "east": {
+      "maximum": 180,
+      "minimum": -180,
+      "title": "East",
+      "type": "number"
+    },
+    "first_observed_at": {
+      "format": "date-time",
+      "title": "First Observed At",
+      "type": "string"
+    },
+    "footprint_cells": {
+      "description": "Distinct resolution-7 H3 cells detected",
+      "minimum": 1,
+      "title": "Footprint Cells",
+      "type": "integer"
+    },
+    "footprint_km2": {
+      "description": "footprint_cells times the mean cell area",
+      "minimum": 0,
+      "title": "Footprint Km2",
+      "type": "number"
+    },
+    "h3_cell": {
+      "description": "Resolution-2 H3 cell that contains every detection",
+      "title": "H3 Cell",
+      "type": "string"
+    },
+    "incident_id": {
+      "description": "Also the Kafka message key",
+      "format": "uuid",
+      "title": "Incident Id",
+      "type": "string"
+    },
+    "last_observed_at": {
+      "format": "date-time",
+      "title": "Last Observed At",
+      "type": "string"
+    },
+    "latitude": {
+      "description": "Mean detection latitude",
+      "maximum": 90,
+      "minimum": -90,
+      "title": "Latitude",
+      "type": "number"
+    },
+    "longitude": {
+      "description": "Mean detection longitude",
+      "maximum": 180,
+      "minimum": -180,
+      "title": "Longitude",
+      "type": "number"
+    },
+    "max_frp_mw": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Frp Mw"
+    },
+    "merged_into": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The incident that absorbed this one (status merged)",
+      "title": "Merged Into"
+    },
+    "north": {
+      "maximum": 90,
+      "minimum": -90,
+      "title": "North",
+      "type": "number"
+    },
+    "previous_status": {
+      "anyOf": [
+        {
+          "enum": [
+            "new",
+            "growing",
+            "stable",
+            "inactive",
+            "merged"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Previous Status"
+    },
+    "products": {
+      "items": {
+        "enum": [
+          "VIIRS_SNPP_NRT",
+          "VIIRS_NOAA20_NRT",
+          "VIIRS_NOAA21_NRT",
+          "MODIS_NRT"
+        ],
+        "type": "string"
+      },
+      "title": "Products",
+      "type": "array"
+    },
+    "revision": {
+      "description": "Increases by one with every published change",
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "south": {
+      "maximum": 90,
+      "minimum": -90,
+      "title": "South",
+      "type": "number"
+    },
+    "status": {
+      "enum": [
+        "new",
+        "growing",
+        "stable",
+        "inactive",
+        "merged"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "total_frp_mw": {
+      "description": "Sum of the detections' known FRP",
+      "minimum": 0,
+      "title": "Total Frp Mw",
+      "type": "number"
+    },
+    "updated_at": {
+      "description": "Stream time (newest observation seen by the processor) at this revision",
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "west": {
+      "maximum": 180,
+      "minimum": -180,
+      "title": "West",
+      "type": "number"
+    }
+  },
+  "required": [
+    "incident_id",
+    "revision",
+    "status",
+    "h3_cell",
+    "first_observed_at",
+    "last_observed_at",
+    "updated_at",
+    "detection_count",
+    "footprint_cells",
+    "footprint_km2",
+    "latitude",
+    "longitude",
+    "west",
+    "south",
+    "east",
+    "north",
+    "total_frp_mw",
+    "products",
+    "daily"
+  ],
+  "title": "FireIncident",
+  "type": "object"
+}

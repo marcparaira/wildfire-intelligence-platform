@@ -77,13 +77,11 @@ is an event, and storage, alerts, and the live map are projections of the log.
 Use a Python stream-processing library (Quix Streams) for stateful and
 windowed processing.
 
-- Cluster detections into fire incidents by space and time, and track each
-  incident's lifecycle (new, growing, stable, inactive) in `fire.incidents`.
-- Enrich detections with the latest weather for their grid cell.
-- Compute a simple, documented risk indicator from fire activity and weather.
-- Produce hourly per-country detection and FRP statistics.
-- Display incidents, their growth over time, and weather context in the
-  dashboard.
+- [x] Cluster detections into fire incidents by space and time, and track each incident's lifecycle (new, growing, stable, inactive) in `fire.incidents`.
+- [x] Enrich detections with the latest weather for their grid cell.
+- [x] Compute a simple, documented risk indicator from fire activity and weather.
+- [x] Produce hourly per-country detection and FRP statistics.
+- [x] Display incidents, their growth over time, and weather context in the dashboard.
 
 **Deliverable:** Incident-level situational awareness derived from the stream.
 

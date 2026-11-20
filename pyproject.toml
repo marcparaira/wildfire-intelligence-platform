@@ -11,13 +11,16 @@ dependencies = [
     "wildfire-api",
     "wildfire-ingestor",
     "wildfire-sink-worker",
+    "wildfire-stream-processor",
 ]
 
 [dependency-groups]
+# Pinned so local runs and CI use identical quality tools (docs/python-coding-principles.md).
 dev = [
-    "httpx>=0.28,<1.0",
-    "pytest>=8.3,<9",
-    "ruff>=0.9,<1",
+    "basedpyright==1.40.1",
+    "httpx==0.28.1",
+    "pytest==8.4.2",
+    "ruff==0.17.6",
 ]
 
 [tool.uv]
@@ -29,6 +32,7 @@ members = [
     "apps/api",
     "services/ingestor",
     "services/sink-worker",
+    "services/stream-processor",
 ]
 
 # Sources declared at the workspace root apply to every member, so the
@@ -38,11 +42,73 @@ wildfire-events = { workspace = true }
 wildfire-api = { workspace = true }
 wildfire-ingestor = { workspace = true }
 wildfire-sink-worker = { workspace = true }
+wildfire-stream-processor = { workspace = true }
 
 [tool.basedpyright]
-include = ["packages/events", "apps/api", "services/ingestor", "services/sink-worker"]
+include = [
+    "packages/events",
+    "apps/api",
+    "services/ingestor",
+    "services/sink-worker",
+    "services/stream-processor",
+]
 exclude = ["**/__pycache__", "**/.venv", "**/node_modules"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
+# "recommended" enables every "strict" rule plus extra ones (reportAny,
+# reportUnusedCallResult, ...) and fails on warnings, so it satisfies the
+# standard's strict-mode requirement with a stricter baseline.
 typeCheckingMode = "recommended"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["typings"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # import order
+    "UP",      # modern syntax (X | None, built-in generics)
+    "B",       # bugbear, including B904 (raise ... from ...)
+    "BLE",     # no blind `except Exception` without a documented reason
+    "C4",      # comprehensions
+    "FBT",     # boolean positional arguments that switch behaviour
+    "G",       # logging calls use lazy %-formatting
+    "LOG",     # logging misuse
+    "N",       # naming
+    "PIE",
+    "PT",      # pytest style
+    "PTH",     # pathlib over os.path / open()
+    "RET",     # early returns
+    "RUF",
+    "SIM",     # simpler control flow
+    "T20",     # no print()
+    "TRY",     # exception handling
+]
+ignore = [
+    "N818",    # domain names such as RetryLater or InvalidEvent read better without "Error"
+    "TRY003",  # messages at the raise site are clearer than one exception class per message
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "wildfire_api",
+    "wildfire_events",
+    "wildfire_ingestor",
+    "wildfire_processor",
+    "wildfire_sink",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "packages/events/tests",
+    "apps/api/tests",
+    "services/ingestor/tests",
+    "services/sink-worker/tests",
+    "services/stream-processor/tests",
+]
+# Test module names repeat across projects (test_weather.py, ...).
+addopts = ["--import-mode=importlib"]

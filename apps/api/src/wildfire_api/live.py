@@ -17,24 +17,23 @@ the ``retry`` delay and resumes from its last ID.
 """
 
 import logging
-import os
 import time
-from collections.abc import AsyncIterator, Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime
 from functools import cache
-from typing import Annotated, cast
+from typing import Annotated, Protocol, cast
 from uuid import UUID
 
 import anyio
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from kafka import KafkaConsumer
-from kafka.consumer.fetcher import ConsumerRecord
 from kafka.structs import TopicPartition
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
+from wildfire_api.bounds import Bounds, BoundsDep
+from wildfire_api.settings import Settings, SettingsDep
 from wildfire_events.codec import EventCodec, InvalidEvent
 from wildfire_events.models import FirmsDetection
 from wildfire_events.registry import SchemaRegistry
@@ -49,6 +48,7 @@ MAX_BATCH = 500
 KEEPALIVE_SECONDS = 15
 RECONNECT_MS = 5000
 LOOKBACK_MS = 2 * 60 * 1000
+REQUEST_TIMEOUT_MS = 30_000
 
 Position = dict[int, int]
 """Next offset to read, per partition."""
@@ -59,7 +59,9 @@ class LiveDetection(BaseModel):
 
     ``id`` is the PostGIS row ID and is not known yet. ``duplicate_of`` is always
     null: cross-sensor duplicates are only resolved in the projection, so a
-    refresh can hide a detection that arrived live.
+    refresh can hide a detection that arrived live. ``country``, ``risk``, and
+    ``weather`` are null too: enrichment happens downstream of this topic, and a
+    refresh fills them in.
     """
 
     id: None = None
@@ -72,6 +74,9 @@ class LiveDetection(BaseModel):
     longitude: float
     attributes: dict[str, str]
     duplicate_of: None = None
+    country: None = None
+    risk: None = None
+    weather: None = None
 
     @classmethod
     def from_event(cls, event: FirmsDetection) -> "LiveDetection":
@@ -85,17 +90,6 @@ class LiveDetection(BaseModel):
             longitude=event.longitude,
             attributes=event.attributes,
         )
-
-
-@dataclass(frozen=True)
-class Bounds:
-    west: float
-    south: float
-    east: float
-    north: float
-
-    def contains(self, latitude: float, longitude: float) -> bool:
-        return self.west <= longitude <= self.east and self.south <= latitude <= self.north
 
 
 def format_position(position: Mapping[int, int]) -> str:
@@ -129,27 +123,83 @@ def sse_message(event: str | None, data: str | None, event_id: str) -> str:
 
 
 @cache
-def registry() -> SchemaRegistry:
-    return SchemaRegistry(os.environ.get("SCHEMA_REGISTRY_URL", "http://localhost:18081"))
+def registry(url: str) -> SchemaRegistry:
+    """One registry client per URL, so schema IDs are looked up once per process."""
+    return SchemaRegistry(url)
+
+
+class DetectionDecoder(Protocol):
+    """Decodes a record value; ``EventCodec[FirmsDetection]`` implements it."""
+
+    def decode(self, value: bytes | None) -> FirmsDetection: ...
+
+
+class PolledRecord(Protocol):
+    """The parts of a ``ConsumerRecord`` the live feed reads."""
+
+    @property
+    def offset(self) -> int: ...
+
+    @property
+    def value(self) -> object: ...
+
+
+class DetectionBatcher:
+    """Turns polled records into the detections one client should see.
+
+    ``position`` advances past every record read, including invalid and filtered
+    ones, so a resumed stream never re-reads them.
+    """
+
+    def __init__(self, decoder: DetectionDecoder, position: Mapping[int, int]) -> None:
+        self.decoder: DetectionDecoder = decoder
+        self.position: Position = dict(position)
+
+    def matching(
+        self, polled: Mapping[TopicPartition, Sequence[PolledRecord]], bounds: Bounds | None
+    ) -> list[LiveDetection]:
+        batch: list[LiveDetection] = []
+        for tp, records in polled.items():
+            for record in records:
+                try:
+                    event = self.decoder.decode(cast(bytes | None, record.value))
+                except InvalidEvent as exc:
+                    # The sink worker dead-letters these; the live view just skips them.
+                    LOGGER.debug("Skipping %s[%d]@%d: %s", TOPIC, tp.partition, record.offset, exc)
+                    continue
+                if bounds is None or bounds.contains(event.latitude, event.longitude):
+                    batch.append(LiveDetection.from_event(event))
+            if records:
+                self.position[tp.partition] = records[-1].offset + 1
+        return batch
 
 
 class DetectionFeed:
     """Blocking Kafka side of one SSE connection; every call runs in a worker thread."""
 
-    def __init__(self, bootstrap_servers: str, codec: EventCodec[FirmsDetection]) -> None:
-        self.codec: EventCodec[FirmsDetection] = codec
-        self.consumer: KafkaConsumer = KafkaConsumer(
+    def __init__(self, consumer: KafkaConsumer, decoder: DetectionDecoder) -> None:
+        self.consumer: KafkaConsumer = consumer
+        self.batcher: DetectionBatcher = DetectionBatcher(decoder, {})
+
+    @classmethod
+    def connect(cls, bootstrap_servers: str, decoder: DetectionDecoder) -> "DetectionFeed":
+        consumer = KafkaConsumer(
             bootstrap_servers=bootstrap_servers,
             client_id="api-live-detections",
             group_id=None,
             enable_auto_commit=False,
             auto_offset_reset="latest",
             max_poll_records=MAX_BATCH,
-            request_timeout_ms=30000,
+            request_timeout_ms=REQUEST_TIMEOUT_MS,
         )
-        self.position: Position = {}
+        return cls(consumer, decoder)
+
+    @property
+    def position(self) -> Position:
+        return self.batcher.position
 
     def start(self, resume_from: Mapping[int, int]) -> None:
+        """Assign every partition and seek to ``resume_from``, or the look-back start."""
         partitions = cast(set[int] | None, self.consumer.partitions_for_topic(TOPIC))
         if not partitions:
             raise RuntimeError(f"topic {TOPIC} has no partitions (does it exist?)")
@@ -160,50 +210,43 @@ class DetectionFeed:
             if tp.partition in resume_from:
                 self.consumer.seek(tp, resume_from[tp.partition])
         if fresh:
-            since = int(time.time() * 1000) - LOOKBACK_MS
-            found = self.consumer.offsets_for_times({tp: since for tp in fresh})
-            for tp in fresh:
-                match = found.get(tp)
-                if match is None:
-                    self.consumer.seek_to_end(tp)
-                else:
-                    self.consumer.seek(tp, match.offset)
-        self.position = {tp.partition: cast(int, self.consumer.position(tp)) for tp in assigned}
+            self._seek_to_lookback(fresh)
+        self.batcher.position = {
+            tp.partition: cast(int, self.consumer.position(tp)) for tp in assigned
+        }
+
+    def _seek_to_lookback(self, partitions: list[TopicPartition]) -> None:
+        since = int(time.time() * 1000) - LOOKBACK_MS
+        found = self.consumer.offsets_for_times(dict.fromkeys(partitions, since))
+        for tp in partitions:
+            match = found.get(tp)
+            if match is None:
+                self.consumer.seek_to_end(tp)
+            else:
+                self.consumer.seek(tp, match.offset)
 
     def poll(self, bounds: Bounds | None) -> list[LiveDetection]:
         """Next batch of matching detections; advances ``position`` past every record read."""
         polled = self.consumer.poll(timeout_ms=POLL_TIMEOUT_MS, max_records=MAX_BATCH)
-        return list(self._matching(polled, bounds))
-
-    def _matching(
-        self, polled: Mapping[TopicPartition, list[ConsumerRecord]], bounds: Bounds | None
-    ) -> Iterable[LiveDetection]:
-        for tp, records in polled.items():
-            for record in records:
-                try:
-                    event = self.codec.decode(cast(bytes | None, record.value))
-                except InvalidEvent as exc:
-                    # The sink worker dead-letters these; the live view just skips them.
-                    LOGGER.debug("Skipping %s[%d]@%d: %s", TOPIC, tp.partition, record.offset, exc)
-                    continue
-                if bounds is None or bounds.contains(event.latitude, event.longitude):
-                    yield LiveDetection.from_event(event)
-            if records:
-                self.position[tp.partition] = records[-1].offset + 1
+        return self.batcher.matching(polled, bounds)
 
     def close(self) -> None:
         self.consumer.close(autocommit=False)
 
 
 async def detection_events(
-    request: Request, bounds: Bounds | None, resume_from: Position
+    request: Request, settings: Settings, bounds: Bounds | None, resume_from: Position
 ) -> AsyncIterator[str]:
+    """The SSE body. Failures end the stream (logged); the browser reconnects and resumes."""
     yield f"retry: {RECONNECT_MS}\n\n"
-    bootstrap = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
-    codec = EventCodec(FirmsDetection, value_subject(TOPIC), registry())
+    codec = EventCodec(FirmsDetection, value_subject(TOPIC), registry(settings.schema_registry_url))
     try:
-        feed = await run_in_threadpool(DetectionFeed, bootstrap, codec)
+        feed = await run_in_threadpool(
+            DetectionFeed.connect, settings.kafka_bootstrap_servers, codec
+        )
     except Exception:
+        # The response has started, so an error status is impossible: ending the
+        # stream makes the browser retry after RECONNECT_MS.
         LOGGER.exception("Live detections: Kafka is unavailable")
         return
     try:
@@ -224,6 +267,8 @@ async def detection_events(
                 yield sse_message(None, None, event_id)
                 last_sent = time.monotonic()
     except Exception:
+        # Same boundary as above: any Kafka or schema-registry failure ends this one
+        # stream, and the client resumes from its last event ID.
         LOGGER.exception("Live detections stream stopped; the client will reconnect")
     finally:
         # Cancellation (client gone) waits for any running poll to return first, so the
@@ -235,10 +280,8 @@ async def detection_events(
 @router.get("/events/detections", response_class=StreamingResponse)
 async def live_detections(
     request: Request,
-    west: Annotated[float | None, Query(ge=-180, le=180)] = None,
-    south: Annotated[float | None, Query(ge=-90, le=90)] = None,
-    east: Annotated[float | None, Query(ge=-180, le=180)] = None,
-    north: Annotated[float | None, Query(ge=-90, le=90)] = None,
+    settings: SettingsDep,
+    bounds: BoundsDep,
     last_event_id: Annotated[str | None, Header()] = None,
     resume_from: Annotated[str | None, Query(alias="last_event_id")] = None,
 ) -> StreamingResponse:
@@ -252,15 +295,8 @@ async def live_detections(
     ``last_event_id`` query parameter does the same for a client that has to open
     a new EventSource, which cannot set headers.
     """
-    bounds: Bounds | None = None
-    if any(value is not None for value in (west, south, east, north)):
-        if west is None or south is None or east is None or north is None:
-            raise HTTPException(422, "All four geographic bounds are required")
-        if west >= east or south >= north:
-            raise HTTPException(422, "West must be less than east and south less than north")
-        bounds = Bounds(west, south, east, north)
     return StreamingResponse(
-        detection_events(request, bounds, parse_position(last_event_id or resume_from)),
+        detection_events(request, settings, bounds, parse_position(last_event_id or resume_from)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

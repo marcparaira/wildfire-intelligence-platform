@@ -1,17 +1,16 @@
 """Read access to the PostGIS projections maintained by the sink worker."""
 
-import os
 from collections.abc import Sequence
 from typing import LiteralString
 
 import psycopg
 from psycopg.rows import class_row
 
-DEFAULT_DATABASE_URL = "postgresql://wildfire:wildfire_dev@localhost:55432/wildfire"
+CONNECT_TIMEOUT_SECONDS = 5
 
 
-def connect() -> psycopg.Connection:
-    return psycopg.connect(os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL), connect_timeout=5)
+def connect(database_url: str) -> psycopg.Connection:
+    return psycopg.connect(database_url, connect_timeout=CONNECT_TIMEOUT_SECONDS)
 
 
 def fetch_all[R](

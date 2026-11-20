@@ -10,87 +10,171 @@ rest.
 
 ## Architecture Diagram
 
+## Architecture Diagram
+
+## Architecture Diagram
+
 ```mermaid
 flowchart LR
-    SRC["External sources<br/>NASA FIRMS, Open-Meteo"]
-    SRC_P["Planned sources<br/>OpenAQ, Himawari"]
+    %% External Sources (Implemented)
+    FIRMS["NASA FIRMS API<br/>(Fire detections)"]
+    METEO["Open-Meteo API<br/>(Weather forecasts)"]
 
-    ING["Ingestor<br/>Scheduled producers"]
+    %% External Sources (Planned)
+    OPENAQ["OpenAQ API<br/>(Air quality)"]
+    HIMAWARI["Himawari-8<br/>(Satellite imagery)"]
 
+    %% Ingestor Service
+    ING["Ingestor Service"]
+
+    %% Apache Kafka (Compact)
     subgraph KAFKA["Apache Kafka + Schema Registry"]
-        direction TB
-        T_SRC["Source topics"]
-        T_DLQ["Dead-letter topics"]
-        T_USER["User topics"]
-        T_DER["Derived topics"]
+        T_SRC["Source Topics<br/>(firms.detections,<br/>weather.forecasts)"]
+        T_DER["Derived Topics<br/>(detections.enriched,<br/>fire.incidents,<br/>stats.hourly)"]
+        T_USER["User Topics"]
+        T_DLQ["Dead-Letter Topics"]
     end
 
-    STREAM["Stream processor<br/>Enrichment, incidents,<br/>statistics, alert matching"]
-
-    subgraph WORKER["Sink worker"]
-        direction TB
-        W_DB["PostGIS projections"]
-        W_S3["S3 archiver"]
-        W_ALERT["Alert notifier"]
+    %% Stream Processor Service
+    subgraph STREAM["Stream Processor"]
+        S_ENRICH["Enrichment<br/>(weather + risk)"]
+        S_INC["Incidents<br/>(clustering)"]
+        S_STATS["Statistics<br/>(hourly aggregation)"]
     end
 
+    %% Sink Worker Service
+    subgraph WORKER["Sink Worker"]
+        W_DB["PostGIS Projector"]
+        W_S3["S3 Archiver"]
+        W_ALERT["Alert Notifier"]
+    end
+
+    %% Data Storage & Destinations
     DB[("PostgreSQL<br/>+ PostGIS")]
-    S3[("Amazon S3<br/>Event archive")]
-    NOTIFY["Email / webhook"]
+    S3[("Amazon S3")]
+    EMAIL["Email"]
+    WEBHOOK["Webhooks"]
 
-    API["FastAPI<br/>REST + SSE"]
-    UI["React + OpenLayers<br/>dashboard"]
+    %% API & Frontend
+    API["API Server<br/>(FastAPI)"]
+    UI["Web Dashboard<br/>(React)"]
 
-    SRC --> ING
-    SRC_P -.-> ING
+    %% Main flows: Sources to Ingestor
+    FIRMS --> ING
+    METEO --> ING
+    OPENAQ -.-> ING
+    HIMAWARI -.-> ING
+
+    %% Ingestor to Kafka Source Topics
     ING --> T_SRC
-    T_SRC --> W_DB --> DB
-    W_DB -->|invalid events| T_DLQ
-    T_SRC -->|live detections| API
-    API -->|queries| DB
-    UI <-->|HTTPS + SSE| API
 
-    T_SRC & T_USER -.-> STREAM
-    STREAM -.-> T_DER
-    T_DER -.->|incidents, alerts| API
+    %% Stream Processor: Source Topics to Jobs (both Enrichment and Incidents in parallel)
+    T_SRC --> S_ENRICH
+    T_SRC --> S_INC
+
+    %% Stream Processor: Enrichment output to Derived Topics
+    S_ENRICH --> T_DER
+
+    %% Stream Processor: Incidents output to Derived Topics
+    S_INC --> T_DER
+
+    %% Stream Processor: Statistics reads from Derived (Enriched), outputs to Derived
+    T_DER --> S_STATS
+    S_STATS --> T_DER
+
+    %% Error handling
+    S_ENRICH -->|invalid| T_DLQ
+    S_INC -->|invalid| T_DLQ
+    S_STATS -->|invalid| T_DLQ
+
+    %% Sink Worker: Derived Topics to Storage
+    T_DER --> W_DB
+    T_DER --> W_S3
+    T_DER --> W_ALERT
+
+    %% Storage destinations
+    W_DB --> DB
+    W_S3 -.-> S3
+    W_ALERT -.-> EMAIL
+    W_ALERT -.-> WEBHOOK
+
+    %% API: Database and Kafka
+    DB --> API
+    T_SRC -->|live| API
+
+    %% Planned: User topics and alerts
     API -.->|user actions| T_USER
-    T_DER -.-> W_ALERT -.-> NOTIFY
-    T_SRC -.-> W_S3 -.-> S3
+    T_DER -.->|alerts| API
 
-    classDef external fill:#e0f2fe,stroke:#0284c7,color:#075985
-    classDef streaming fill:#fef3c7,stroke:#d97706,color:#92400e
-    classDef data fill:#dcfce7,stroke:#16a34a,color:#166534
-    classDef planned fill:#f8fafc,stroke:#94a3b8,stroke-dasharray:5 4,color:#64748b
+    %% Frontend
+    API <-->|HTTPS + SSE| UI
 
-    class SRC external
-    class T_SRC,T_DLQ streaming
-    class DB data
-    class SRC_P,T_USER,T_DER,STREAM,W_S3,W_ALERT,S3,NOTIFY planned
-    style KAFKA fill:#fffbeb,stroke:#d97706,color:#92400e
-    style WORKER fill:#f8fafc,stroke:#64748b
+    %% Styling
+    classDef done fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#166534
+    classDef planned fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,stroke-dasharray:5 4,color:#64748b
+    classDef external fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#075985
+    classDef streaming fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#92400e
+    classDef storage fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+
+    class FIRMS,METEO external
+    class ING done
+    class T_SRC,T_DER,T_DLQ streaming
+    class DB storage
+    class S_ENRICH,S_INC,S_STATS done
+    class W_DB done
+    class API,UI done
+
+    class OPENAQ,HIMAWARI planned
+    class T_USER planned
+    class S_ALERT planned
+    class S3,EMAIL,WEBHOOK planned
+    class W_S3,W_ALERT planned
+
+    style KAFKA fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#92400e
+    style STREAM fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,color:#075985
+    style WORKER fill:#faf5ff,stroke:#a855f7,stroke-width:2px,color:#581c87
 ```
 
-Solid boxes and arrows are implemented (Phases 1–7); dashed grey boxes and
-dotted arrows are planned.
+Solid boxes and arrows are implemented; dashed grey boxes and dotted arrows
+are planned. Arrows show the direction data flows.
 
 ## Services
 
-| Service | Responsibilities | Reads | Writes |
-|---|---|---|---|
-| Ingestor | Scheduled FIRMS, weather, and air-quality producers | External APIs | Source topics |
-| Stream processor | Weather enrichment, risk indicator, incident clustering and lifecycle, hourly statistics, watch-area matching | Source and user topics | Derived and dead-letter topics |
-| Sink worker | Persist projections to PostGIS, archive topics to S3, deliver alert notifications | All topics | PostGIS, S3, email/webhook |
-| API | Hotspot, incident, and weather queries; live updates over SSE; user actions | PostGIS, derived topics | User topics |
-| Web | Live map, incidents, alerts, air quality, replay, pipeline status | API | — |
+| Service | Jobs | Responsibilities | Reads | Writes |
+|---|---|---|---|---|
+| **Ingestor** | — | Scheduled data producers for external sources | NASA FIRMS API, Open-Meteo API | `firms.detections`, `weather.forecasts` |
+| **Stream Processor** | Enrichment, Incidents, Statistics, Alert (planned) | Add weather/country/risk to detections; cluster incidents; aggregate statistics; match watch areas | Source topics, compacted topics | Derived topics, `*.dlq` |
+| **Sink Worker** | PostGIS Projector, S3 Archiver, Alert Notifier (planned) | Persist projections to database; archive to S3; send notifications | All topics | PostgreSQL, S3, email/webhook |
+| **API Server** | — | Query incidents/hotspots/weather; stream live updates; handle user actions | PostgreSQL, Kafka (live stream) | User topics (`watch-areas`, `field-reports`, `alert-acks`) |
+| **Web Dashboard** | — | Display live fire map; show incidents, weather, alerts; replay events | API Server | — |
 
 ## Topics
 
-| Family | Topics |
-|---|---|
-| Source | `firms.detections`, `weather.forecasts` (compacted), `airquality.readings` |
-| User | `watch-areas` (compacted), `field-reports`, `alert-acks` |
-| Derived | `detections.enriched`, `fire.incidents`, `alerts`, `stats.hourly` |
-| Dead letter | One `*.dlq` topic per consuming service (`sink-worker.dlq` today) |
+| Family | Topics | Status |
+|---|---|---|
+| **Source** | `firms.detections` | ✅ Implemented |
+| | `weather.forecasts` (compacted) | ✅ Implemented |
+| | `airquality.readings` | 🔲 Planned |
+| **Derived** | `detections.enriched` | ✅ Implemented |
+| | `fire.incidents` | ✅ Implemented |
+| | `stats.hourly` | ✅ Implemented |
+| | `alerts` | 🔲 Planned |
+| **User** | `watch-areas` (compacted) | 🔲 Planned |
+| | `field-reports` | 🔲 Planned |
+| | `alert-acks` | 🔲 Planned |
+| **Dead Letter** | `*.dlq` per consumer (e.g., `sink-worker.dlq`) | ✅ Implemented |
+
+## External Systems
+
+| System | Type | Purpose | Status |
+|---|---|---|---|
+| **NASA FIRMS API** | Data source | Satellite fire detections (SNPP, NOAA20) | ✅ Implemented |
+| **Open-Meteo API** | Data source | Weather forecasts (temperature, wind, precipitation) | ✅ Implemented |
+| **OpenAQ API** | Data source | Air quality readings | 🔲 Planned |
+| **Himawari-8** | Data source | Geostationary satellite imagery | 🔲 Planned |
+| **PostgreSQL + PostGIS** | Data storage | Event projections, incidents, detection conditions | ✅ Implemented |
+| **Amazon S3** | Data storage | Topic archival for long-term retention | 🔲 Planned |
+| **Email / Webhooks** | Notifications | Alert delivery to users | 🔲 Planned |
 
 ## Architectural Principles
 
