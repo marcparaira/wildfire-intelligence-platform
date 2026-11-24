@@ -29,6 +29,7 @@ from wildfire_imagery.sentinel import (
     TILE_PIXELS,
     SentinelProducer,
     Timing,
+    breadth_first,
     clipped_area,
     composite,
     plan_passes,
@@ -156,6 +157,38 @@ def test_passes_are_ordered_during_then_after_then_before_activity() -> None:
         (TODAY - timedelta(days=8), Timing.BEFORE),
     ]
     assert {request.scene.layer for request in requests} == {ImageryLayer.SENTINEL2_SWIR}
+
+
+def test_backlog_gives_every_tile_its_first_scene_before_any_second() -> None:
+    other = Tile(229, 2)  # 114.5-115.0 E, the granule reaches it too
+    third = Tile(240, 2)  # 120.0-120.5 E, has a scene already
+    activity = {
+        TILE: frozenset(days_ago(1, 4)),
+        other: frozenset(days_ago(7)),
+        third: frozenset(days_ago(1, 4)),
+    }
+    granules = [
+        granule(TODAY - timedelta(days=1)),
+        granule(TODAY - timedelta(days=4)),
+        granule(TODAY - timedelta(days=7)),
+        granule(TODAY - timedelta(days=1), name="T51NAA", bounds=(119.9, 0.9, 120.9, 1.9)),
+        granule(TODAY - timedelta(days=4), name="T51NAA", bounds=(119.9, 0.9, 120.9, 1.9)),
+    ]
+    planned = plan_passes(activity, granules)
+    have = next(r for r in planned if r.scene.tile == third and r.timing is Timing.DURING)
+    ordered = breadth_first(planned, {have.scene_id})
+    assert [(r.scene.tile, r.scene.day, r.timing) for r in ordered] == [
+        # First scenes: each tile's newest pass during activity.
+        (TILE, TODAY - timedelta(days=1), Timing.DURING),
+        (other, TODAY - timedelta(days=7), Timing.DURING),
+        # Second scenes, including the third tile's: its first is acquired.
+        (TILE, TODAY - timedelta(days=4), Timing.DURING),
+        (third, TODAY - timedelta(days=4), Timing.DURING),
+        (other, TODAY - timedelta(days=1), Timing.AFTER),
+        # Third scenes.
+        (other, TODAY - timedelta(days=4), Timing.AFTER),
+        (TILE, TODAY - timedelta(days=7), Timing.BEFORE),
+    ]
 
 
 def test_tiles_are_those_of_the_detections_without_a_margin() -> None:

@@ -23,8 +23,9 @@ DEFAULT_IMAGERY_INTERVAL_MINUTES = 60
 DEFAULT_IMAGERY_DAYS = 5
 MAX_IMAGERY_DAYS = 10
 DEFAULT_IMAGERY_MAX_SCENES_PER_RUN = 120
-# A Sentinel-2 scene takes one 5-10 s render per granule, so fewer fit in a run.
-DEFAULT_SENTINEL_MAX_SCENES_PER_RUN = 40
+# A Sentinel-2 scene takes one 5-10 s render per granule (about 2.5 per scene), so
+# 200 scenes take most of an hour; fewer would leave the job idle behind a backlog.
+DEFAULT_SENTINEL_MAX_SCENES_PER_RUN = 200
 DEFAULT_IMAGERY_DIR = "data/imagery"
 
 

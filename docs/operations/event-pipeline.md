@@ -364,9 +364,11 @@ lose B8A, and smoke is thin at these wavelengths. The code is in
   their detections (without the 0.05° margin: a tile already shows the
   surroundings, and a margin tile would cost renders on every pass). Sentinel-2 passes
   every 2-5 days, so passes from 6 days (`SENTINEL_CONTEXT_DAYS`) before an
-  incident's first to 6 days after its last day of activity are taken: those
-  during the activity first (the fire may be burning), then after it (the burn
-  scar), then before it (the baseline), most recent first. Activity up to 6 days
+  incident's first to 6 days after its last day of activity are taken. Every
+  tile gets its first scene before any tile gets a second, so a backlog gives
+  each incident one image first. For each tile, passes during the activity come
+  first (the fire may be burning), then after it (the burn scar), then before
+  it (the baseline), most recent first. Activity up to 6 days
   before the `IMAGERY_DAYS` window still counts, so its later passes are found.
 - **Search.** One STAC search per run (`POST /api/stac/v1/search`) covers every
   needed tile (neighbours in a row merged into strips) and the whole date range,
@@ -379,7 +381,7 @@ lose B8A, and smoke is thin at these wavelengths. The code is in
   The renders are composited, clearest on top, into one WebP whose area without
   data stays transparent. Scenes with under 1% coverage are
   not stored and not retried until a restart; failed ones are retried after an
-  hour. At most `SENTINEL_MAX_SCENES_PER_RUN` (default 40) per run.
+  hour. At most `SENTINEL_MAX_SCENES_PER_RUN` (default 200, most of an hour) per run.
 - **Metadata.** `SatelliteScene` also carries `acquired_at` (the pass's sensing
   time), `cloud_cover` (mean of the granules), and `granules` (their IDs); these
   are null or empty for the daily GIBS composites.

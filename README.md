@@ -243,7 +243,7 @@ The imagery worker (`services/imagery-worker`) runs apart from the ingestor: it 
 | `IMAGERY_INTERVAL_MINUTES` | `60` | Imagery acquisition interval |
 | `IMAGERY_DAYS` | `5` | Days of incident activity to fetch imagery for, counted back from the newest activity (1–10) |
 | `IMAGERY_MAX_SCENES_PER_RUN` | `120` | GIBS images fetched per run; the rest wait for the next run |
-| `SENTINEL_MAX_SCENES_PER_RUN` | `40` | Sentinel-2 scenes rendered per run (5-10 s each per granule) |
+| `SENTINEL_MAX_SCENES_PER_RUN` | `200` | Sentinel-2 scenes rendered per run (5-10 s each per granule) |
 | `IMAGERY_DIR` | `data/imagery` (`/data/imagery` in the container) | Imagery store directory |
 
 See the [event pipeline guide](docs/operations/event-pipeline.md#satellite-imagery) for how scenes are chosen, stored, and kept across restarts.

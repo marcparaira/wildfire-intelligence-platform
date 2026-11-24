@@ -10,8 +10,9 @@ pass (UTC day): the pass's granules (110 km MGRS tiles, which overlap) are each
 rendered over the tile, composited, and stored as one WebP image whose areas
 without data stay transparent. Each run finds the passes over the tiles of current
 incidents, from ``SENTINEL_CONTEXT_DAYS`` before their first to as long after their
-last day of activity, and acquires those not in ``imagery.scenes`` yet: passes
-during the activity first, then the burn scars after it, then the baselines before.
+last day of activity, and acquires those not in ``imagery.scenes`` yet: each tile's
+first scene before any tile's second, and for each tile the passes during the
+activity first, then the burn scars after it, then the baselines before.
 """
 
 import hashlib
@@ -240,10 +241,35 @@ def plan_passes(
             key=lambda granule: (-granule.cloud_cover, granule.item_id),
         )
         requests.append(PassRequest(SceneRequest(LAYER, day, tile), when, tuple(ordered)))
-    return sorted(
-        requests,
-        key=lambda request: (request.timing, -request.scene.day.toordinal(), request.scene.tile),
-    )
+    return sorted(requests, key=_pass_order)
+
+
+def _pass_order(request: PassRequest) -> tuple[Timing, int, Tile]:
+    return request.timing, -request.scene.day.toordinal(), request.scene.tile
+
+
+def breadth_first(requests: Iterable[PassRequest], acquired: set[uuid.UUID]) -> list[PassRequest]:
+    """The requests not in ``acquired``, each tile's next scene before any tile's later one.
+
+    A tile's scenes keep the ``plan_passes`` order, and its rank counts the scenes it
+    already has: every tile gets its first scene before any gets a second, so a
+    backlog gives each incident one image first instead of every pass of a few.
+    Within a rank, the ``plan_passes`` order holds.
+    """
+    have: dict[Tile, int] = {}
+    due: list[PassRequest] = []
+    for request in requests:
+        if request.scene_id in acquired:
+            have[request.scene.tile] = have.get(request.scene.tile, 0) + 1
+        else:
+            due.append(request)
+    ranked: list[tuple[int, PassRequest]] = []
+    for request in sorted(due, key=_pass_order):
+        tile = request.scene.tile
+        ranked.append((have.get(tile, 0), request))
+        have[tile] = have.get(tile, 0) + 1
+    ranked.sort(key=lambda item: (item[0], _pass_order(item[1])))
+    return [request for _, request in ranked]
 
 
 def composite(images: Sequence[bytes], width: int, height: int) -> tuple[bytes, float]:
@@ -313,10 +339,8 @@ class SentinelProducer:
         granules = self.source.search(search_areas(activity), start, end, MAX_GRANULE_CLOUD_COVER)
         due = [
             request
-            for request in plan_passes(activity, granules)
-            if request.scene_id not in self.acquired
-            and request.scene_id not in self._not_before
-            and request.scene_id not in self._no_data
+            for request in breadth_first(plan_passes(activity, granules), self.acquired)
+            if request.scene_id not in self._not_before and request.scene_id not in self._no_data
         ]
         batch = due[: self.max_scenes_per_run]
         outcomes = [self._acquire(request, now) for request in batch]
