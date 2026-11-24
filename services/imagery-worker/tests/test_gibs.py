@@ -18,21 +18,12 @@ from wildfire_events.models import (
     IncidentStatus,
     SatelliteScene,
 )
-from wildfire_ingestor.config import parse_layers
-from wildfire_ingestor.imagery import (
-    TILE_PIXELS,
-    FileSceneStore,
-    ImageryProducer,
-    SceneRequest,
-    Tile,
-    is_blank,
-    plan_scenes,
-    storage_key,
-    tiles_covering,
-)
-from wildfire_ingestor.publisher import Publisher
-from wildfire_ingestor.scheduler import RetryLater
-from wildfire_ingestor.sources import FetchedImage, GibsClient
+from wildfire_imagery.config import parse_layers
+from wildfire_imagery.gibs import TILE_PIXELS, GibsClient, GibsProducer, is_blank, plan_scenes
+from wildfire_imagery.scenes import FetchedImage, FileSceneStore, SceneRequest, storage_key
+from wildfire_imagery.tiles import Tile, tiles_covering
+from wildfire_producers.publisher import Publisher
+from wildfire_producers.scheduler import RetryLater
 
 NOW = datetime(2026, 3, 6, 13, tzinfo=UTC)
 TODAY = NOW.date()
@@ -273,8 +264,8 @@ def producer(
     *,
     acquired: set[uuid.UUID] | None = None,
     max_scenes: int = 100,
-) -> ImageryProducer:
-    return ImageryProducer(
+) -> GibsProducer:
+    return GibsProducer(
         incidents=lambda: incidents,
         source=source,
         store=store,

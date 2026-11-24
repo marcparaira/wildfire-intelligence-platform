@@ -13,8 +13,8 @@ from wildfire_events.countries import CountryLocator, selected_countries
 from wildfire_events.models import FirmsDetection, FirmsProduct, Instrument
 from wildfire_ingestor.config import parse_products
 from wildfire_ingestor.detections import FirmsProducer, parse_csv, select_countries
-from wildfire_ingestor.publisher import PublishedEvents, Publisher
 from wildfire_ingestor.sources import FirmsClient
+from wildfire_producers.publisher import PublishedEvents, Publisher
 
 FIXTURES = Path(__file__).parent / "fixtures"
 VIIRS = (FIXTURES / "viirs_noaa20.csv").read_text()

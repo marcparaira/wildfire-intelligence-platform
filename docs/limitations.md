@@ -20,6 +20,6 @@
 - The Sentinel-2 `cloud_cover` is that of the 110 km source granules, not of the tile shown; a tile can be clearer or cloudier.
 - Sentinel-2 imagery depends on Microsoft Planetary Computer's free STAC and rendering APIs, which have no service-level guarantee; rendering takes 5-10 s per granule, so a backlog can take several runs to catch up.
 - Daily VIIRS imagery is only fetched for an incident's days of activity within the `IMAGERY_DAYS` days up to the newest incident activity; Sentinel-2 passes also for 6 days before and after them.
-- The imagery job reads the whole `fire.incidents` topic on every run. That takes about a second for a few thousand incidents, but grows with the number of incidents kept.
+- The imagery worker reads the whole `fire.incidents` topic on every run of each of its two jobs. That takes about a second for a few thousand incidents, but grows with the number of incidents kept.
 - The imagery store is a local volume. Scenes listed in `imagery.scenes` are not refetched if their files are lost, and replaying the topic on another machine does not bring the images.
 - The empty-image check is a size heuristic; a nearly uniform real image (for example solid cloud at low resolution) could be skipped and retried.

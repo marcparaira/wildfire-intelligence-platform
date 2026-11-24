@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wildfire-ingestor"
 version = "0.2.0"
-description = "Scheduled FIRMS, Open-Meteo, and satellite imagery producers"
+description = "Scheduled FIRMS and Open-Meteo producers"
 requires-python = ">=3.12"
 dependencies = [
     "wildfire-events",
+    "wildfire-producers",
     "h3>=4.2,<5",
     "kafka-python>=2.2,<3",
-    "pillow>=11,<13",
     "pydantic>=2.10,<3",
 ]
 

@@ -39,12 +39,12 @@ studies. System architecture is documented separately.
 ## 3. Containerization
 
 The local environment is defined in the repository-root `compose.yaml`; run
-`podman compose up --build` to start the web application, API, ingestor, sink
-worker, PostgreSQL/PostGIS, Kafka, the Karapace schema registry, and Kafka UI.
+`podman compose up --build` to start the web application, API, ingestor,
+imagery worker, sink worker, PostgreSQL/PostGIS, Kafka, the Karapace schema registry, and Kafka UI.
 
 Application container definitions live alongside their source in `apps/web`,
 `apps/api`, and `services/*`. The Python services are built from the repository
-root so they can include the shared `packages/events` contracts. All
+root so they can include the shared `packages/events` contracts and, for the ingestor and imagery worker, the `packages/producers` runtime. All
 application services run in individual Podman containers.
 
 - Separate build and runtime environments.

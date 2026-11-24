@@ -5,7 +5,7 @@ smaller than that. Sentinel-2 images at 20 m in short-wave infrared, where flame
 are bright and smoke is thin, every 2-5 days and a few days late, from Microsoft
 Planetary Computer.
 
-Scenes use the tile grid of ``wildfire_ingestor.imagery``. A scene is one tile on one
+Scenes use the tile grid of ``wildfire_imagery.tiles``. A scene is one tile on one
 pass (UTC day): the pass's granules (110 km MGRS tiles, which overlap) are each
 rendered over the tile, composited, and stored as one WebP image whose areas
 without data stay transparent. Each run finds the passes over the tiles of current
@@ -35,18 +35,11 @@ from wildfire_events.models import (
     IncidentStatus,
     SatelliteScene,
 )
-from wildfire_ingestor.imagery import (
-    TILE_DEGREES,
-    Outcome,
-    SceneRequest,
-    SceneStore,
-    Tile,
-    storage_key,
-    tiles_covering,
-)
-from wildfire_ingestor.publisher import Publisher
-from wildfire_ingestor.scheduler import RetryLater
-from wildfire_ingestor.sources import Bounds, FetchedImage, Ring, SentinelGranule
+from wildfire_imagery.planetary_computer import Ring, SentinelGranule
+from wildfire_imagery.scenes import FetchedImage, Outcome, SceneRequest, SceneStore, storage_key
+from wildfire_imagery.tiles import TILE_DEGREES, Bounds, Tile, tiles_covering
+from wildfire_producers.publisher import Publisher
+from wildfire_producers.scheduler import RetryLater
 
 LOGGER = logging.getLogger(__name__)
 
@@ -293,7 +286,7 @@ def _utc_now() -> datetime:
 class SentinelProducer:
     """Acquires missing Sentinel-2 scenes of current incidents on each run.
 
-    Like ``ImageryProducer``: ``incidents`` returns the latest incident revisions and
+    Like ``GibsProducer``: ``incidents`` returns the latest incident revisions and
     ``acquired`` the IDs of scenes in ``imagery.scenes``. Failed scenes are retried
     after a delay; scenes the pass's data does not reach are not retried while the
     process runs.

@@ -317,7 +317,8 @@ running members. After a replay, lag counts down to zero.
 
 ## Satellite imagery
 
-The ingestor's imagery job (every `IMAGERY_INTERVAL_MINUTES`, default 60) reads
+The imagery worker (`services/imagery-worker`, package `wildfire_imagery`) runs
+two jobs. Its GIBS job (every `IMAGERY_INTERVAL_MINUTES`, default 60) reads
 the latest revision of every incident from the compacted `fire.incidents` topic
 and fetches NASA GIBS daily corrected-reflectance composites for the incident
 areas. GIBS needs no API key.
@@ -343,9 +344,9 @@ areas. GIBS needs no API key.
   `<layer>/<day>/<tile>-<sha256 prefix>.jpg`; then its `SatelliteScene`
   metadata (bounds, size, acquisition day, retrieval time, hash, store key, and
   source URL) is published. The image never travels through Kafka. Locally,
-  the store is the `imagery-data` volume, written by the ingestor and mounted
+  the store is the `imagery-data` volume, written by the imagery worker and mounted
   read-only into the API (`IMAGERY_DIR`).
-- **Restarts.** At startup the ingestor reads the scene IDs already in
+- **Restarts.** At startup the imagery worker reads the scene IDs already in
   `imagery.scenes` and does not fetch them again. Deleting the volume therefore
   does not refetch existing scenes; their images return 404 until the scenes are
   removed from the topic.
@@ -357,9 +358,11 @@ A second job (also every `IMAGERY_INTERVAL_MINUTES`, enabled when
 used to confirm fires: Sentinel-2 L2A bands B12, B8A, and B04 at 20 m, from
 Microsoft Planetary Computer (no API key). Flames are bright in B12, burn scars
 lose B8A, and smoke is thin at these wavelengths. The code is in
-`wildfire_ingestor.sentinel`.
+`wildfire_imagery.sentinel`.
 
-- **Which passes.** The same incidents and tiles as above. Sentinel-2 passes
+- **Which passes.** The same incidents as above, but only the tiles that contain
+  their detections (without the 0.05° margin: a tile already shows the
+  surroundings, and a margin tile would cost renders on every pass). Sentinel-2 passes
   every 2-5 days, so passes from 6 days (`SENTINEL_CONTEXT_DAYS`) before an
   incident's first to 6 days after its last day of activity are taken: those
   during the activity first (the fire may be burning), then after it (the burn
@@ -369,10 +372,12 @@ lose B8A, and smoke is thin at these wavelengths. The code is in
   needed tile (neighbours in a row merged into strips) and the whole date range,
   without granules over 90% cloud, following the `next` pages.
 - **Scenes.** A scene is one tile on one pass day, with the same tile grid and
-  scene ID as above. Each granule (110 km MGRS tile) of the pass that reaches the
-  tile is rendered over the tile at 2048 × 2048 px (about 27 m) by the Planetary
-  Computer data API, and they are composited, clearest on top, into one WebP
-  whose area without data stays transparent. Scenes with under 1% coverage are
+  scene ID as above. Each granule (110 km MGRS tile) of the pass whose footprint
+  covers at least 1% of the tile is rendered over the tile at 2048 × 2048 px
+  (about 27 m) by the Planetary Computer data API. Footprints, not bounding
+  boxes, decide: at a swath edge the bounding box covers far more than the data.
+  The renders are composited, clearest on top, into one WebP whose area without
+  data stays transparent. Scenes with under 1% coverage are
   not stored and not retried until a restart; failed ones are retried after an
   hour. At most `SENTINEL_MAX_SCENES_PER_RUN` (default 40) per run.
 - **Metadata.** `SatelliteScene` also carries `acquired_at` (the pass's sensing

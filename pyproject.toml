@@ -8,8 +8,10 @@ version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
     "wildfire-events",
+    "wildfire-producers",
     "wildfire-api",
     "wildfire-ingestor",
+    "wildfire-imagery-worker",
     "wildfire-sink-worker",
     "wildfire-stream-processor",
 ]
@@ -29,8 +31,10 @@ package = false
 [tool.uv.workspace]
 members = [
     "packages/events",
+    "packages/producers",
     "apps/api",
     "services/ingestor",
+    "services/imagery-worker",
     "services/sink-worker",
     "services/stream-processor",
 ]
@@ -40,15 +44,19 @@ members = [
 [tool.uv.sources]
 wildfire-events = { workspace = true }
 wildfire-api = { workspace = true }
+wildfire-producers = { workspace = true }
 wildfire-ingestor = { workspace = true }
+wildfire-imagery-worker = { workspace = true }
 wildfire-sink-worker = { workspace = true }
 wildfire-stream-processor = { workspace = true }
 
 [tool.basedpyright]
 include = [
     "packages/events",
+    "packages/producers",
     "apps/api",
     "services/ingestor",
+    "services/imagery-worker",
     "services/sink-worker",
     "services/stream-processor",
 ]
@@ -97,16 +105,20 @@ ignore = [
 known-first-party = [
     "wildfire_api",
     "wildfire_events",
+    "wildfire_imagery",
     "wildfire_ingestor",
     "wildfire_processor",
+    "wildfire_producers",
     "wildfire_sink",
 ]
 
 [tool.pytest.ini_options]
 testpaths = [
     "packages/events/tests",
+    "packages/producers/tests",
     "apps/api/tests",
     "services/ingestor/tests",
+    "services/imagery-worker/tests",
     "services/sink-worker/tests",
     "services/stream-processor/tests",
 ]

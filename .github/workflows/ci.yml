@@ -76,6 +76,7 @@ jobs:
       - name: Unit and integration tests
         env:
           API_TEST_DATABASE_URL: postgresql://wildfire:wildfire_dev@localhost:55432/wildfire
+          PRODUCERS_TEST_KAFKA: localhost:19092
           INGESTOR_TEST_KAFKA: localhost:19092
           INGESTOR_TEST_SCHEMA_REGISTRY: http://localhost:18081
           SINK_TEST_DATABASE_URL: postgresql://wildfire:wildfire_dev@localhost:55432/wildfire
@@ -108,6 +109,7 @@ jobs:
       - name: Build service images
         run: |
           podman build -f services/ingestor/Containerfile -t wildfire-ingestor .
+          podman build -f services/imagery-worker/Containerfile -t wildfire-imagery-worker .
           podman build -f services/sink-worker/Containerfile -t wildfire-sink-worker .
           podman build -f services/stream-processor/Containerfile -t wildfire-stream-processor .
           podman build -f apps/api/Containerfile -t wildfire-api .
@@ -115,6 +117,7 @@ jobs:
       - name: Smoke-test service images
         run: |
           podman run --rm wildfire-ingestor python -c "from wildfire_events.countries import selected_countries; assert selected_countries().covers([(13.756, 100.502)]) == [True]"
+          podman run --rm wildfire-imagery-worker python -c "import wildfire_imagery.service; from PIL import features; assert features.check('webp')"
           podman run --rm wildfire-sink-worker python -c "import wildfire_sink.service"
           podman run --rm wildfire-stream-processor python -c "import wildfire_processor.service"
           podman run --rm wildfire-api python -c "import wildfire_api.main"

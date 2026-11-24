@@ -1,7 +1,7 @@
 """Satellite imagery of fire incidents.
 
 Scene metadata comes from the ``satellite_scenes`` projection of ``imagery.scenes``;
-the images themselves are read from the imagery store the ingestor writes to
+the images themselves are read from the imagery store the imagery worker writes to
 (mounted read-only into the API container).
 """
 
@@ -228,7 +228,7 @@ def incident_imagery(settings: SettingsDep, incident_id: UUID) -> IncidentImager
 
     Each scene is one tile of a daily NASA GIBS composite or of a Sentinel-2 pass (also
     shown for a few days around the activity); its image is served by
-    ``GET /imagery/{scene_id}``. The list is empty until the ingestor has acquired
+    ``GET /imagery/{scene_id}``. The list is empty until the imagery worker has acquired
     imagery for the incident's area.
     """
     try:

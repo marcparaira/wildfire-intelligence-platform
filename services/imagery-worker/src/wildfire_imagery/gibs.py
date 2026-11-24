@@ -1,28 +1,22 @@
 """Satellite imagery of fire incidents from NASA GIBS daily composites.
 
-See ``wildfire_ingestor.sentinel`` for the Sentinel-2 passes, which share the tile
-grid, the store, and the topic.
-
-Images are fetched per tile of a fixed ``TILE_DEGREES`` grid rather than per incident:
-neighbouring incidents share tiles, a growing incident only adds the tiles it newly
-reaches, and a tile of one layer on one day is a stable scene that is acquired once.
-
-Each run plans the scenes covering every non-merged incident on its days of
-activity, skips scenes already in ``imagery.scenes``, writes each new image to the
-imagery store, and then publishes its ``SatelliteScene`` metadata (a claim check:
-the image never travels through Kafka).
+VIIRS NOAA-20 true and false color at 250-750 m, one composite per UTC day. Each run
+plans the scenes (tiles of ``wildfire_imagery.tiles``) covering every non-merged
+incident on its days of activity, skips scenes already in ``imagery.scenes``,
+writes each new image to the store, and then publishes its ``SatelliteScene``.
+See ``wildfire_imagery.sentinel`` for the Sentinel-2 passes.
 """
 
 import hashlib
 import logging
-import math
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
-from enum import StrEnum, auto
-from pathlib import Path
-from typing import Protocol
+from http import HTTPStatus
+from typing import Final, Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 
 from wildfire_events.models import (
     FireIncident,
@@ -30,19 +24,27 @@ from wildfire_events.models import (
     ImageryProvider,
     IncidentStatus,
     SatelliteScene,
-    scene_id,
 )
-from wildfire_ingestor.publisher import Publisher
-from wildfire_ingestor.scheduler import RetryLater
-from wildfire_ingestor.sources import GIBS_MEDIA_TYPE, FetchedImage
+from wildfire_imagery.scenes import (
+    FetchedImage,
+    Outcome,
+    SceneRequest,
+    SceneStore,
+    storage_key,
+)
+from wildfire_imagery.tiles import Bounds, tiles_covering
+from wildfire_producers.http import HttpGet, excerpt, http_get, retry_after_seconds
+from wildfire_producers.publisher import Publisher
+from wildfire_producers.scheduler import RetryLater
 
 LOGGER = logging.getLogger(__name__)
 
-TILE_DEGREES = 0.5
+GIBS_WMS_URL = "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi"
+GIBS_TIMEOUT_SECONDS = 60
+GIBS_MEDIA_TYPE: Final = "image/jpeg"
+JPEG_SIGNATURE = b"\xff\xd8\xff"
 # About 110 m per pixel at the equator, finer than the 250-750 m VIIRS imagery.
 TILE_PIXELS = 512
-# Context around the outermost detections of an incident.
-INCIDENT_MARGIN_DEGREES = 0.05
 # GIBS builds a day's composite as the passes arrive. Over Southeast Asia the NOAA-20
 # daytime pass (about 13:30 local time) is processed by about noon UTC.
 DAY_READY_AFTER = timedelta(hours=12)
@@ -51,56 +53,58 @@ DAY_READY_AFTER = timedelta(hours=12)
 BLANK_BYTES_PER_PIXEL = 0.01
 EMPTY_RETRY_AFTER = timedelta(hours=6)
 FAILED_RETRY_AFTER = timedelta(hours=1)
-SHORT_HASH_CHARS = 16
 
 
-@dataclass(frozen=True, slots=True, order=True)
-class Tile:
-    """A ``TILE_DEGREES`` square; column and row count from longitude 0 and latitude 0."""
+class GibsClient:
+    """NASA GIBS (Global Imagery Browse Services) WMS in geographic coordinates.
 
-    column: int
-    row: int
+    GIBS needs no API key. It answers errors such as an unknown layer with HTTP 200
+    and an XML service exception, so the body is checked to be a JPEG.
+    """
 
-    @property
-    def name(self) -> str:
-        return f"x{self.column}y{self.row}"
+    def __init__(self, get: HttpGet = http_get) -> None:
+        self._get: HttpGet = get
 
-    @property
-    def bounds(self) -> tuple[float, float, float, float]:
-        """West, south, east, north in degrees."""
-        west = self.column * TILE_DEGREES
-        south = self.row * TILE_DEGREES
-        return west, south, west + TILE_DEGREES, south + TILE_DEGREES
+    def fetch_image(
+        self,
+        layer: ImageryLayer,
+        day: date,
+        bounds: Bounds,
+        width: int,
+        height: int,
+    ) -> FetchedImage:
+        """The layer's daily composite over ``bounds`` (west, south, east, north) as JPEG.
 
-
-def tiles_covering(
-    west: float,
-    south: float,
-    east: float,
-    north: float,
-    margin: float = INCIDENT_MARGIN_DEGREES,
-) -> list[Tile]:
-    """Tiles intersecting the bounds grown by ``margin``, row by row from the south-west."""
-    max_column = math.ceil(180 / TILE_DEGREES) - 1
-    max_row = math.ceil(90 / TILE_DEGREES) - 1
-
-    def index(value: float, upper: int) -> int:
-        return max(-upper - 1, min(upper, math.floor(value / TILE_DEGREES)))
-
-    columns = range(index(west - margin, max_column), index(east + margin, max_column) + 1)
-    rows = range(index(south - margin, max_row), index(north + margin, max_row) + 1)
-    return [Tile(column, row) for row in rows for column in columns]
-
-
-@dataclass(frozen=True, slots=True)
-class SceneRequest:
-    layer: ImageryLayer
-    day: date
-    tile: Tile
-
-    @property
-    def scene_id(self) -> uuid.UUID:
-        return scene_id(self.layer, self.day, self.tile.name)
+        Raises ``RetryLater`` when rate limited and ``RuntimeError`` on other failures.
+        """
+        west, south, east, north = bounds
+        parameters = {
+            "SERVICE": "WMS",
+            "REQUEST": "GetMap",
+            "VERSION": "1.3.0",
+            "LAYERS": layer.value,
+            "STYLES": "",
+            "FORMAT": GIBS_MEDIA_TYPE,
+            "CRS": "EPSG:4326",
+            # WMS 1.3.0 orders EPSG:4326 axes latitude first.
+            "BBOX": f"{south},{west},{north},{east}",
+            "WIDTH": str(width),
+            "HEIGHT": str(height),
+            "TIME": day.isoformat(),
+        }
+        url = f"{GIBS_WMS_URL}?{urlencode(parameters)}"
+        try:
+            content = self._get(url, timeout=GIBS_TIMEOUT_SECONDS)
+        except HTTPError as exc:
+            if exc.code == HTTPStatus.TOO_MANY_REQUESTS:
+                seconds = retry_after_seconds(exc.headers.get("Retry-After"))
+                raise RetryLater("GIBS rate limit reached", seconds) from exc
+            raise RuntimeError(f"GIBS request failed with HTTP {exc.code}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise RuntimeError(f"GIBS request failed: {type(exc).__name__}") from exc
+        if not content.startswith(JPEG_SIGNATURE):
+            raise RuntimeError(f"GIBS returned no image: {excerpt(content)}")
+        return FetchedImage(url, content)
 
 
 def day_is_ready(day: date, now: datetime) -> bool:
@@ -158,40 +162,6 @@ def is_blank(content: bytes, width: int, height: int) -> bool:
     return len(content) < BLANK_BYTES_PER_PIXEL * width * height
 
 
-def storage_key(request: SceneRequest, sha256: str, extension: str = "jpg") -> str:
-    """Store path of an image; the content hash makes every stored file immutable."""
-    return (
-        f"{request.layer.value}/{request.day.isoformat()}/"
-        f"{request.tile.name}-{sha256[:SHORT_HASH_CHARS]}.{extension}"
-    )
-
-
-class SceneStore(Protocol):
-    """Where image bytes are kept; ``FileSceneStore`` implements it."""
-
-    def put(self, key: str, content: bytes) -> None: ...
-
-
-class FileSceneStore:
-    """Images as files under a root directory shared with the API (read-only there).
-
-    Files are written to a temporary name and renamed, so a reader never sees a
-    partial image. Keys are content-addressed, so an existing file is left alone.
-    """
-
-    def __init__(self, root: Path) -> None:
-        self.root: Path = root
-
-    def put(self, key: str, content: bytes) -> None:
-        path = self.root / key
-        if path.exists():
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        partial = path.with_name(f".{path.name}.{uuid.uuid4().hex}.partial")
-        _ = partial.write_bytes(content)
-        _ = partial.replace(path)
-
-
 class ImageSource(Protocol):
     """Daily images of a layer; ``GibsClient`` implements it."""
 
@@ -199,16 +169,10 @@ class ImageSource(Protocol):
         self,
         layer: ImageryLayer,
         day: date,
-        bounds: tuple[float, float, float, float],
+        bounds: Bounds,
         width: int,
         height: int,
     ) -> FetchedImage: ...
-
-
-class Outcome(StrEnum):
-    ACQUIRED = auto()
-    EMPTY = auto()
-    FAILED = auto()
 
 
 def _utc_now() -> datetime:
@@ -216,7 +180,7 @@ def _utc_now() -> datetime:
 
 
 @dataclass
-class ImageryProducer:
+class GibsProducer:
     """Acquires missing scenes for current incidents on each run.
 
     ``incidents`` returns the latest revision of recently updated incidents.

@@ -6,8 +6,10 @@ requires-python = ">=3.12"
 members = [
     "wildfire-api",
     "wildfire-events",
+    "wildfire-imagery-worker",
     "wildfire-ingestor",
     "wildfire-intelligence-platform",
+    "wildfire-producers",
     "wildfire-sink-worker",
     "wildfire-stream-processor",
 ]
@@ -1612,24 +1614,45 @@ requires-dist = [
 ]
 
 [[package]]
+name = "wildfire-imagery-worker"
+version = "0.1.0"
+source = { editable = "services/imagery-worker" }
+dependencies = [
+    { name = "kafka-python" },
+    { name = "pillow" },
+    { name = "pydantic" },
+    { name = "wildfire-events" },
+    { name = "wildfire-producers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "kafka-python", specifier = ">=2.2,<3" },
+    { name = "pillow", specifier = ">=11,<13" },
+    { name = "pydantic", specifier = ">=2.10,<3" },
+    { name = "wildfire-events", editable = "packages/events" },
+    { name = "wildfire-producers", editable = "packages/producers" },
+]
+
+[[package]]
 name = "wildfire-ingestor"
 version = "0.2.0"
 source = { editable = "services/ingestor" }
 dependencies = [
     { name = "h3" },
     { name = "kafka-python" },
-    { name = "pillow" },
     { name = "pydantic" },
     { name = "wildfire-events" },
+    { name = "wildfire-producers" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "h3", specifier = ">=4.2,<5" },
     { name = "kafka-python", specifier = ">=2.2,<3" },
-    { name = "pillow", specifier = ">=11,<13" },
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "wildfire-events", editable = "packages/events" },
+    { name = "wildfire-producers", editable = "packages/producers" },
 ]
 
 [[package]]
@@ -1639,7 +1662,9 @@ source = { virtual = "." }
 dependencies = [
     { name = "wildfire-api" },
     { name = "wildfire-events" },
+    { name = "wildfire-imagery-worker" },
     { name = "wildfire-ingestor" },
+    { name = "wildfire-producers" },
     { name = "wildfire-sink-worker" },
     { name = "wildfire-stream-processor" },
 ]
@@ -1656,7 +1681,9 @@ dev = [
 requires-dist = [
     { name = "wildfire-api", editable = "apps/api" },
     { name = "wildfire-events", editable = "packages/events" },
+    { name = "wildfire-imagery-worker", editable = "services/imagery-worker" },
     { name = "wildfire-ingestor", editable = "services/ingestor" },
+    { name = "wildfire-producers", editable = "packages/producers" },
     { name = "wildfire-sink-worker", editable = "services/sink-worker" },
     { name = "wildfire-stream-processor", editable = "services/stream-processor" },
 ]
@@ -1667,6 +1694,23 @@ dev = [
     { name = "httpx", specifier = "==0.28.1" },
     { name = "pytest", specifier = "==8.4.2" },
     { name = "ruff", specifier = "==0.17.6" },
+]
+
+[[package]]
+name = "wildfire-producers"
+version = "0.1.0"
+source = { editable = "packages/producers" }
+dependencies = [
+    { name = "kafka-python" },
+    { name = "pydantic" },
+    { name = "wildfire-events" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "kafka-python", specifier = ">=2.2,<3" },
+    { name = "pydantic", specifier = ">=2.10,<3" },
+    { name = "wildfire-events", editable = "packages/events" },
 ]
 
 [[package]]

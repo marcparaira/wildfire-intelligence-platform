@@ -15,14 +15,13 @@ from wildfire_events.models import FirmsProduct
 from wildfire_ingestor.config import (
     PRODUCER_CLIENT_ID,
     Settings,
-    configure_logging,
-    connect_registry,
     detection_publisher,
     load_published_detections,
     read_map_key,
 )
 from wildfire_ingestor.detections import publish_csv
 from wildfire_ingestor.sources import FirmsClient
+from wildfire_producers.runtime import configure_logging, connect_registry
 
 LOGGER = logging.getLogger(__name__)
 STDIN = "-"
@@ -64,7 +63,9 @@ def _publish(text: str, product: FirmsProduct) -> str:
     published = load_published_detections(settings)
     producer = idempotent_producer(settings.kafka, PRODUCER_CLIENT_ID)
     try:
-        publisher = detection_publisher(producer, connect_registry(settings), published)
+        publisher = detection_publisher(
+            producer, connect_registry(settings.registry_url), published
+        )
         return publish_csv(text, product, publisher, selected_countries())
     finally:
         producer.close()

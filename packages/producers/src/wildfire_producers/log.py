@@ -1,8 +1,8 @@
 """Reading recent state back from Kafka topics.
 
-The ingestor keeps no local state: on startup it learns what it already published
-by reading the tail of its own topics, and the imagery producer reads the current
-incidents from ``fire.incidents``.
+The producer services keep no local state: on startup they learn what they already
+published by reading the tail (or, for compacted topics, the whole) of their own
+topics, and the imagery worker reads the current incidents from ``fire.incidents``.
 """
 
 import time
@@ -13,9 +13,9 @@ from kafka import KafkaConsumer
 from kafka.consumer.fetcher import ConsumerRecord
 from kafka.structs import TopicPartition
 
-from wildfire_ingestor.publisher import EVENT_ID_HEADER, PublishedEvents
+from wildfire_producers.publisher import EVENT_ID_HEADER, PublishedEvents
 
-CLIENT_ID: Final = "wildfire-ingestor-state"
+CLIENT_ID: Final = "wildfire-producer-state"
 POLL_TIMEOUT_MS = 1000
 LOAD_MAX_RECORDS = 5000
 LATEST_DEADLINE_SECONDS = 30

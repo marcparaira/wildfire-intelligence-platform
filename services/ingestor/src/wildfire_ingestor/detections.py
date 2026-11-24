@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from wildfire_events.cells import partition_cell
 from wildfire_events.countries import REGION_BOUNDS, CountryLocator
 from wildfire_events.models import FirmsDetection, FirmsProduct, detection_event_id
-from wildfire_ingestor.publisher import Publisher
+from wildfire_producers.publisher import Publisher
 
 LOGGER = logging.getLogger(__name__)
 REQUIRED_FIELDS = frozenset({"latitude", "longitude", "acq_date", "acq_time", "satellite"})

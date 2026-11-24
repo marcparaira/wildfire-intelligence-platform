@@ -1,0 +1,29 @@
+# Build from the repository root so the shared packages are in the context:
+#   podman build -f services/imagery-worker/Containerfile .
+FROM docker.io/library/python:3.12-alpine AS build
+
+WORKDIR /build
+COPY packages/events ./packages/events
+COPY packages/producers ./packages/producers
+COPY services/imagery-worker/pyproject.toml ./services/imagery-worker/
+COPY services/imagery-worker/src ./services/imagery-worker/src
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir \
+        ./packages/events ./packages/producers ./services/imagery-worker
+
+FROM docker.io/library/python:3.12-alpine AS runtime
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# /data/imagery is the imagery store; a new named volume mounted there takes over
+# its ownership, so the unprivileged user can write images. The user is created
+# like the ingestor's was (same UID), so the existing imagery volume stays writable.
+RUN apk add --no-cache libstdc++ \
+    && addgroup -S app && adduser -S -G app app \
+    && mkdir -p /data/imagery && chown app:app /data/imagery
+COPY --from=build /opt/venv /opt/venv
+ENV IMAGERY_DIR=/data/imagery
+USER app
+CMD ["python", "-m", "wildfire_imagery"]

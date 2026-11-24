@@ -2,15 +2,14 @@ import io
 import json
 from datetime import UTC, datetime
 from email.message import Message
-from threading import Event
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from wildfire_ingestor import weather
-from wildfire_ingestor.scheduler import RetryLater, ScheduledJob, run_job
-from wildfire_ingestor.sources import OpenMeteoClient, retry_after_seconds
+from wildfire_ingestor.sources import OpenMeteoClient
+from wildfire_producers.scheduler import RetryLater
 
 GENERATED = datetime(2026, 3, 4, 20, tzinfo=UTC)
 CELL = weather.forecast_cells()[0]
@@ -94,35 +93,3 @@ def test_rate_limit_asks_the_scheduler_to_retry_later() -> None:
     with pytest.raises(RetryLater) as raised:
         _ = OpenMeteoClient(limited).fetch_locations([CELL])
     assert raised.value.seconds == 17
-
-
-@pytest.mark.parametrize(
-    ("header", "seconds"),
-    [(None, 60), ("0", 1), ("not a date", 60), ("Wed, 21 Oct 2015 07:28:00 GMT", 1)],
-)
-def test_retry_after_header_parsing(header: str | None, seconds: int) -> None:
-    assert retry_after_seconds(header) == seconds
-
-
-def test_scheduler_waits_the_requested_retry_delay() -> None:
-    stop = Event()
-    delays: list[float | None] = []
-    calls = iter([RetryLater("busy", 17), "ok"])
-
-    def run() -> str:
-        outcome = next(calls)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-    original_wait = stop.wait
-
-    def recording_wait(timeout: float | None = None) -> bool:
-        delays.append(timeout)
-        if len(delays) == 3:
-            stop.set()
-        return original_wait(0)
-
-    stop.wait = recording_wait  # type: ignore[method-assign]
-    run_job(ScheduledJob("test", 600, run, lambda: 5), stop)
-    assert delays == [5, 17, 600]

@@ -23,10 +23,9 @@ from wildfire_events.models import (
     IncidentStatus,
     SatelliteScene,
 )
-from wildfire_ingestor.imagery import Tile
-from wildfire_ingestor.publisher import Publisher
-from wildfire_ingestor.scheduler import RetryLater
-from wildfire_ingestor.sentinel import (
+from wildfire_imagery.planetary_computer import PlanetaryComputerClient, SentinelGranule
+from wildfire_imagery.scenes import FetchedImage
+from wildfire_imagery.sentinel import (
     TILE_PIXELS,
     SentinelProducer,
     Timing,
@@ -38,12 +37,9 @@ from wildfire_ingestor.sentinel import (
     search_window,
     tile_activity,
 )
-from wildfire_ingestor.sources import (
-    Bounds,
-    FetchedImage,
-    PlanetaryComputerClient,
-    SentinelGranule,
-)
+from wildfire_imagery.tiles import Bounds, Tile
+from wildfire_producers.publisher import Publisher
+from wildfire_producers.scheduler import RetryLater
 
 NOW = datetime(2026, 3, 10, 12, tzinfo=UTC)
 TODAY = NOW.date()

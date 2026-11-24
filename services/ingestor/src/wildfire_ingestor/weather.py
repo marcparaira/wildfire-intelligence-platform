@@ -13,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 from wildfire_events.cells import cells_covering
 from wildfire_events.countries import REGION_BOUNDS
 from wildfire_events.models import HourlyWeather, WeatherForecast, WeatherProvider
-from wildfire_ingestor.publisher import Publisher
+from wildfire_producers.publisher import Publisher
 
 LOGGER = logging.getLogger(__name__)
 LOCATIONS_PER_REQUEST = 100
