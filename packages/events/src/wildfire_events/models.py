@@ -56,17 +56,11 @@ class WeatherProvider(StrEnum):
 
 
 class ImageryProvider(StrEnum):
-    NASA_GIBS = "nasa-gibs"
     PLANETARY_COMPUTER = "planetary-computer"
 
 
 class ImageryLayer(StrEnum):
     """Imagery layers of fire incidents.
-
-    The VIIRS layers are daily NASA GIBS corrected-reflectance composites (values are
-    the GIBS layer identifiers) at 250-750 m: true color shows smoke and clouds as the
-    eye would; the false-color composite (bands M11, I2, I1) shows active burning in
-    orange-red and burn scars in brown, and sees through thin smoke.
 
     The Sentinel-2 layer is a 20 m short-wave infrared composite (bands B12, B8A,
     B04) of individual Sentinel-2 L2A passes, every 2-5 days: active flames show
@@ -74,32 +68,24 @@ class ImageryLayer(StrEnum):
     it sees through smoke (not cloud). It is the layer for confirming a fire.
     """
 
-    VIIRS_NOAA20_TRUE_COLOR = "VIIRS_NOAA20_CorrectedReflectance_TrueColor"
-    VIIRS_NOAA20_FALSE_COLOR = "VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1"
     SENTINEL2_SWIR = "Sentinel-2_L2A_SWIR_B12-B8A-B04"
 
     @property
     def provider(self) -> ImageryProvider:
         match self:
-            case ImageryLayer.VIIRS_NOAA20_TRUE_COLOR | ImageryLayer.VIIRS_NOAA20_FALSE_COLOR:
-                return ImageryProvider.NASA_GIBS
             case ImageryLayer.SENTINEL2_SWIR:
                 return ImageryProvider.PLANETARY_COMPUTER
 
     @property
     def instrument(self) -> Instrument:
         match self.provider:
-            case ImageryProvider.NASA_GIBS:
-                return Instrument.VIIRS
             case ImageryProvider.PLANETARY_COMPUTER:
                 return Instrument.MSI
 
     @property
     def platform(self) -> str:
-        """The satellite, or for Sentinel-2 the constellation (scenes name the satellite)."""
+        """The constellation (scenes name the satellite)."""
         match self.provider:
-            case ImageryProvider.NASA_GIBS:
-                return "NOAA-20"
             case ImageryProvider.PLANETARY_COMPUTER:
                 return "Sentinel-2"
 
@@ -149,12 +135,8 @@ FirmsProductLiteral = Literal[
 ]
 WeatherProviderLiteral = Literal[WeatherProvider.OPEN_METEO]
 RiskLevelLiteral = Literal[RiskLevel.LOW, RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.EXTREME]
-ImageryProviderLiteral = Literal[ImageryProvider.NASA_GIBS, ImageryProvider.PLANETARY_COMPUTER]
-ImageryLayerLiteral = Literal[
-    ImageryLayer.VIIRS_NOAA20_TRUE_COLOR,
-    ImageryLayer.VIIRS_NOAA20_FALSE_COLOR,
-    ImageryLayer.SENTINEL2_SWIR,
-]
+ImageryProviderLiteral = Literal[ImageryProvider.PLANETARY_COMPUTER]
+ImageryLayerLiteral = Literal[ImageryLayer.SENTINEL2_SWIR]
 IncidentStatusLiteral = Literal[
     IncidentStatus.NEW,
     IncidentStatus.GROWING,
@@ -503,12 +485,7 @@ class SatelliteScene(BaseModel):
     layer: ImageryLayerLiteral
     instrument: InstrumentLiteral
     platform: str = Field(min_length=1, max_length=32)
-    acquisition_date: date = Field(
-        description=(
-            "UTC day of the daily composite (overpasses within it are not distinguished),"
-            " or of the pass (see acquired_at)"
-        )
-    )
+    acquisition_date: date = Field(description="UTC day of the pass (see acquired_at)")
     tile: str = Field(
         pattern=r"^x-?\d+y-?\d+$",
         description="Grid tile 'x<column>y<row>' of the imagery producer's tile grid",
@@ -519,7 +496,7 @@ class SatelliteScene(BaseModel):
     north: float = Field(ge=-90, le=90)
     width: int = Field(ge=1, description="Image width in pixels")
     height: int = Field(ge=1, description="Image height in pixels")
-    media_type: Literal["image/jpeg", "image/webp"]
+    media_type: Literal["image/webp"]
     byte_size: int = Field(ge=1)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     storage_key: str = Field(
@@ -527,9 +504,7 @@ class SatelliteScene(BaseModel):
     )
     source_url: str = Field(min_length=1, description="Request that returned the image")
     retrieved_at: AwareDatetime
-    acquired_at: AwareDatetime | None = Field(
-        default=None, description="Sensing time of a single pass; None for daily composites"
-    )
+    acquired_at: AwareDatetime | None = Field(default=None, description="Sensing time of the pass")
     cloud_cover: float | None = Field(
         default=None,
         ge=0,

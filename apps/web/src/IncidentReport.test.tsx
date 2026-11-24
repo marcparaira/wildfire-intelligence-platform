@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { IncidentReport } from "./IncidentReport";
 import type { Bounds, Hotspot } from "./hotspots";
 import type { SatelliteScene } from "./imagery";
-import { enrichedHotspot, FALSE_COLOR, incidentDetail, satelliteScene, sentinelScene } from "./test-fixtures";
+import { enrichedHotspot, incidentDetail, satelliteScene } from "./test-fixtures";
 
 vi.mock("./ImageryMap", () => ({
   default: ({ scenes, incidentBounds, detections, opacity }: { scenes: SatelliteScene[]; incidentBounds: Bounds; detections: Hotspot[]; opacity: number }) => (
@@ -53,7 +53,6 @@ describe("incident report", () => {
         satelliteScene({ scene_id: "old", acquisition_date: "2026-03-04" }),
         satelliteScene({ scene_id: "new-west", acquisition_date: "2026-03-05" }),
         satelliteScene({ scene_id: "new-east", acquisition_date: "2026-03-05", bbox: [114.5, 0.5, 115, 1] }),
-        satelliteScene({ scene_id: "false", layer: FALSE_COLOR, acquisition_date: "2026-03-04" }),
       ]),
       hotspots: {
         items: [
@@ -78,7 +77,9 @@ describe("incident report", () => {
     expect(map).toHaveAttribute("data-bounds", INCIDENT.bbox.join(","));
     await waitFor(() => expect(map).toHaveAttribute("data-detections", "1"));
     expect(screen.getByRole("radio", { name: "2026-03-05" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText(/NOAA-20 VIIRS daily composite/)).toHaveTextContent("2 tiles");
+    expect(screen.getByText(/Sentinel-2B MSI pass at/)).toHaveTextContent("2 tiles");
+    // A single layer needs no layer selector.
+    expect(screen.queryByRole("radiogroup", { name: "Imagery layer" })).not.toBeInTheDocument();
 
     // The detections request covers the incident's box and days, duplicates included.
     const hotspotsUrl = fetchMock.mock.calls.map(([url]) => String(url)).find((url) => url.startsWith("/api/hotspots"));
@@ -91,10 +92,6 @@ describe("incident report", () => {
     expect(map).toHaveAttribute("data-scenes", "old");
     expect(map).toHaveAttribute("data-detections", "1");
 
-    fireEvent.click(screen.getByRole("radio", { name: "False color" }));
-    expect(map).toHaveAttribute("data-scenes", "false");
-    expect(screen.getAllByRole("radio", { name: /^2026-/ })).toHaveLength(1);
-
     fireEvent.click(screen.getByLabelText(/Show detections from 2026-03-04/));
     expect(map).toHaveAttribute("data-detections", "0");
     fireEvent.change(screen.getByLabelText("Imagery opacity"), { target: { value: "0.4" } });
@@ -104,17 +101,15 @@ describe("incident report", () => {
   it("defaults to the Sentinel-2 pass on a day with detections, with its time and colour key", async () => {
     stubApi({
       imagery: imagery([
-        sentinelScene({ scene_id: "before", acquisition_date: "2026-03-01", cloud_cover: 3 }),
-        sentinelScene({ scene_id: "during", acquisition_date: "2026-03-04", cloud_cover: 40 }),
-        sentinelScene({ scene_id: "after", acquisition_date: "2026-03-08" }),
-        satelliteScene({ scene_id: "daily", acquisition_date: "2026-03-05" }),
+        satelliteScene({ scene_id: "before", acquisition_date: "2026-03-01", cloud_cover: 3 }),
+        satelliteScene({ scene_id: "during", acquisition_date: "2026-03-04", cloud_cover: 40 }),
+        satelliteScene({ scene_id: "after", acquisition_date: "2026-03-08" }),
       ]),
     });
     render(<IncidentReport incidentId={INCIDENT.incident_id} />);
 
     const map = await screen.findByLabelText("Satellite imagery map");
     expect(map).toHaveAttribute("data-scenes", "during");
-    expect(screen.getByRole("radio", { name: "Sentinel-2 SWIR (20 m)" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "2026-03-04" })).toHaveClass("day-active");
     expect(screen.getByRole("radio", { name: "2026-03-01" })).toHaveAttribute("title", "Before the first detection");
     expect(screen.getByText(/Sentinel-2B MSI pass at/)).toHaveTextContent("2026-03-04 02:13 UTC · granule cloud cover 40–40%");
@@ -123,8 +118,6 @@ describe("incident report", () => {
     fireEvent.click(screen.getByRole("radio", { name: "2026-03-08" }));
     expect(map).toHaveAttribute("data-scenes", "after");
     expect(screen.getByText("after the last detection")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: "True color" }));
-    expect(screen.queryByRole("list", { name: "Colour key" })).not.toBeInTheDocument();
   });
 
   it("explains when no imagery has been acquired yet", async () => {

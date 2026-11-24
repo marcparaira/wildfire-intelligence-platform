@@ -118,7 +118,7 @@ class IncidentNotFound(LookupError):
 
 
 def find_incident_imagery(connection: psycopg.Connection, incident_id: UUID) -> IncidentImagery:
-    """Scenes over the incident on its UTC days of activity, oldest day first.
+    """Scenes over the incident around its UTC days of activity, oldest day first.
 
     Sentinel-2 passes are included from ``SENTINEL_CONTEXT_DAYS`` before the first to
     as long after the last day, as the imagery producer acquires them: a pass rarely
@@ -156,17 +156,14 @@ def find_incident_imagery(connection: psycopg.Connection, incident_id: UUID) -> 
                retrieved_at, west, south, east, north, width, height, acquired_at,
                cloud_cover
         FROM satellite_scenes
-        WHERE acquisition_date BETWEEN %s - CASE WHEN provider = %s THEN %s ELSE 0 END
-                                   AND %s + CASE WHEN provider = %s THEN %s ELSE 0 END
+        WHERE acquisition_date BETWEEN %s - %s AND %s + %s
           AND ST_Intersects(footprint, ST_MakeEnvelope(%s, %s, %s, %s, 4326))
         ORDER BY acquisition_date, layer, south, west
         """,
             [
                 window.first_day,
-                ImageryProvider.PLANETARY_COMPUTER,
                 SENTINEL_CONTEXT_DAYS,
                 window.last_day,
-                ImageryProvider.PLANETARY_COMPUTER,
                 SENTINEL_CONTEXT_DAYS,
                 window.west - SCENE_MARGIN_DEGREES,
                 window.south - SCENE_MARGIN_DEGREES,
@@ -224,10 +221,10 @@ def _unavailable() -> HTTPException:
 
 @router.get("/incidents/{incident_id}/imagery", response_model=IncidentImagery)
 def incident_imagery(settings: SettingsDep, incident_id: UUID) -> IncidentImagery:
-    """Satellite scenes over an incident, from its first to its last day of activity (UTC).
+    """Satellite scenes over an incident, around its days of activity (UTC).
 
-    Each scene is one tile of a daily NASA GIBS composite or of a Sentinel-2 pass (also
-    shown for a few days around the activity); its image is served by
+    Each scene is one tile of a Sentinel-2 pass, from a few days before the first to a
+    few days after the last day of activity; its image is served by
     ``GET /imagery/{scene_id}``. The list is empty until the imagery worker has acquired
     imagery for the incident's area.
     """
@@ -244,7 +241,7 @@ def incident_imagery(settings: SettingsDep, incident_id: UUID) -> IncidentImager
 @router.get(
     "/imagery/{scene_id}",
     response_class=FileResponse,
-    responses={200: {"content": {"image/jpeg": {}, "image/webp": {}}}, 404: {}},
+    responses={200: {"content": {"image/webp": {}}}, 404: {}},
 )
 def scene_image(
     settings: SettingsDep,

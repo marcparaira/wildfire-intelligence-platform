@@ -1,4 +1,4 @@
-"""Imagery worker: scheduled NASA GIBS and Sentinel-2 imagery of current fire incidents.
+"""Imagery worker: scheduled Sentinel-2 imagery of current fire incidents.
 
 It runs apart from the ingestor because it is downstream of the stream processor
 (it reads ``fire.incidents``), slow (a Sentinel-2 run takes minutes), and needs the
@@ -22,7 +22,6 @@ from wildfire_imagery.config import (
     load_acquired_scenes,
     scene_publisher,
 )
-from wildfire_imagery.gibs import GibsClient, GibsProducer
 from wildfire_imagery.planetary_computer import PlanetaryComputerClient
 from wildfire_imagery.scenes import FileSceneStore
 from wildfire_imagery.sentinel import SentinelProducer
@@ -45,38 +44,13 @@ class Arguments(argparse.Namespace):
 def build_jobs(
     settings: Settings, producer: KafkaProducer, registry: SchemaRegistry
 ) -> list[ScheduledJob]:
-    """The NASA GIBS job for its configured layers, and the Sentinel-2 job if configured.
-
-    Both share the acquired scene IDs: their scene IDs never collide (they include
-    the layer), and reading the topic once is enough.
-    """
+    """The Sentinel-2 job, if its layer is configured."""
     ensure_topics(settings.kafka, (SATELLITE_SCENES,))
     incidents = IncidentReader(settings, registry)
     store = FileSceneStore(settings.imagery_dir)
     publisher = scene_publisher(producer, registry)
     acquired = load_acquired_scenes(settings)
     jobs: list[ScheduledJob] = []
-    gibs_layers = tuple(
-        layer for layer in settings.imagery_layers if layer.provider is ImageryProvider.NASA_GIBS
-    )
-    if gibs_layers:
-        gibs = GibsProducer(
-            incidents=incidents,
-            source=GibsClient(),
-            store=store,
-            publisher=publisher,
-            acquired=acquired,
-            layers=gibs_layers,
-            days=settings.imagery_days,
-            max_scenes_per_run=settings.imagery_max_scenes_per_run,
-        )
-        jobs.append(
-            ScheduledJob(
-                f"imagery:{ImageryProvider.NASA_GIBS}",
-                settings.imagery_interval.total_seconds(),
-                gibs.run_once,
-            )
-        )
     if ImageryLayer.SENTINEL2_SWIR in settings.imagery_layers:
         sentinel = SentinelProducer(
             incidents=incidents,

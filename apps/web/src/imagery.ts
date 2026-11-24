@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Bounds } from "./hotspots";
 
-export type ImageryLayer =
-  | "Sentinel-2_L2A_SWIR_B12-B8A-B04"
-  | "VIIRS_NOAA20_CorrectedReflectance_TrueColor"
-  | "VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1";
+export type ImageryLayer = "Sentinel-2_L2A_SWIR_B12-B8A-B04";
 
 export const SENTINEL_SWIR: ImageryLayer = "Sentinel-2_L2A_SWIR_B12-B8A-B04";
 
@@ -14,14 +11,6 @@ export const imageryLayers: Record<ImageryLayer, { label: string; description: s
     label: "Sentinel-2 SWIR (20 m)",
     description:
       "Short-wave infrared (bands B12, B8A, B04) of a single Sentinel-2 pass: flames show bright red to yellow, fresh burn scars dark red-brown, vegetation green; sees through smoke but not cloud.",
-  },
-  "VIIRS_NOAA20_CorrectedReflectance_TrueColor": {
-    label: "True color",
-    description: "Natural color, as the eye would see it: smoke appears grey-brown, clouds white.",
-  },
-  "VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1": {
-    label: "False color",
-    description: "VIIRS bands M11, I2, I1: active fire appears orange-red, burn scars brown, vegetation green; sees through thin smoke.",
   },
 };
 
@@ -37,14 +26,14 @@ export interface SatelliteScene {
   layer: ImageryLayer;
   instrument: string;
   platform: string;
-  /** UTC day of the daily composite or the pass (YYYY-MM-DD). */
+  /** UTC day of the pass (YYYY-MM-DD). */
   acquisition_date: string;
   retrieved_at: string;
   /** [west, south, east, north] of the image. */
   bbox: Bounds;
   width: number;
   height: number;
-  /** Sensing time of a single pass (Sentinel-2); null for daily composites. */
+  /** Sensing time of the pass; null if the API did not return it. */
   acquired_at: string | null;
   /** Cloud cover of the source granules in percent (not of the tile alone). */
   cloud_cover: number | null;

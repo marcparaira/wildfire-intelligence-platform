@@ -35,7 +35,7 @@ class SceneRequest:
         return scene_id(self.layer, self.day, self.tile.name)
 
 
-def storage_key(request: SceneRequest, sha256: str, extension: str = "jpg") -> str:
+def storage_key(request: SceneRequest, sha256: str, extension: str = "webp") -> str:
     """Store path of an image; the content hash makes every stored file immutable."""
     return (
         f"{request.layer.value}/{request.day.isoformat()}/"

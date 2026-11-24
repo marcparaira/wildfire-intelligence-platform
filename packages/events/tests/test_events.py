@@ -247,46 +247,6 @@ SCENE_DAY = date(2026, 3, 5)
 
 
 def scene(**changes: object) -> SatelliteScene:
-    layer = ImageryLayer.VIIRS_NOAA20_TRUE_COLOR
-    values: dict[str, object] = {
-        "scene_id": scene_id(layer, SCENE_DAY, "x228y2"),
-        "provider": "nasa-gibs",
-        "layer": layer,
-        "instrument": "VIIRS",
-        "platform": "NOAA-20",
-        "acquisition_date": SCENE_DAY,
-        "tile": "x228y2",
-        "west": 114.0,
-        "south": 1.0,
-        "east": 114.5,
-        "north": 1.5,
-        "width": 512,
-        "height": 512,
-        "media_type": "image/jpeg",
-        "byte_size": 31_000,
-        "sha256": "ab" * 32,
-        "storage_key": f"{layer}/2026-03-05/x228y2-abababababababab.jpg",
-        "source_url": "https://gibs.example/wms",
-        "retrieved_at": datetime(2026, 3, 6, 1, tzinfo=timezone(timedelta(hours=8))),
-    }
-    values.update(changes)
-    return SatelliteScene.model_validate(values)
-
-
-def test_scene_id_is_deterministic_per_layer_day_and_tile() -> None:
-    layer = ImageryLayer.VIIRS_NOAA20_FALSE_COLOR
-    assert scene_id(layer, SCENE_DAY, "x1y2") == scene_id(layer, SCENE_DAY, "x1y2")
-    assert scene_id(layer, SCENE_DAY, "x1y2") != scene_id(layer, SCENE_DAY, "x2y1")
-    assert scene_id(layer, SCENE_DAY, "x1y2") != scene_id(
-        ImageryLayer.VIIRS_NOAA20_TRUE_COLOR, SCENE_DAY, "x1y2"
-    )
-
-
-def test_scene_normalizes_retrieval_time_to_utc() -> None:
-    assert scene().retrieved_at == datetime(2026, 3, 5, 17, tzinfo=UTC)
-
-
-def sentinel_scene(**changes: object) -> SatelliteScene:
     layer = ImageryLayer.SENTINEL2_SWIR
     values: dict[str, object] = {
         "scene_id": scene_id(layer, SCENE_DAY, "x228y2"),
@@ -294,37 +254,57 @@ def sentinel_scene(**changes: object) -> SatelliteScene:
         "layer": layer,
         "instrument": "MSI",
         "platform": "Sentinel-2B",
+        "acquisition_date": SCENE_DAY,
+        "tile": "x228y2",
+        "west": 114.0,
+        "south": 1.0,
+        "east": 114.5,
+        "north": 1.5,
+        "width": 2783,
+        "height": 2783,
         "media_type": "image/webp",
+        "byte_size": 31_000,
+        "sha256": "ab" * 32,
         "storage_key": f"{layer}/2026-03-05/x228y2-abababababababab.webp",
+        "source_url": "https://planetarycomputer.example/render",
+        "retrieved_at": datetime(2026, 3, 6, 1, tzinfo=timezone(timedelta(hours=8))),
         "acquired_at": datetime(2026, 3, 5, 10, 13, tzinfo=timezone(timedelta(hours=8))),
         "cloud_cover": 12.5,
         "granules": ["S2B_MSIL2A_20260305T021349_R060_T49NGA_20260305T050145"],
-        **changes,
     }
-    return scene(**values)
+    values.update(changes)
+    return SatelliteScene.model_validate(values)
 
 
-def test_sentinel_scenes_carry_their_pass_time_and_granules() -> None:
-    sentinel = sentinel_scene()
+def test_scene_id_is_deterministic_per_layer_day_and_tile() -> None:
+    layer = ImageryLayer.SENTINEL2_SWIR
+    assert scene_id(layer, SCENE_DAY, "x1y2") == scene_id(layer, SCENE_DAY, "x1y2")
+    assert scene_id(layer, SCENE_DAY, "x1y2") != scene_id(layer, SCENE_DAY, "x2y1")
+    assert scene_id(layer, SCENE_DAY, "x1y2") != scene_id(
+        layer, SCENE_DAY + timedelta(days=1), "x1y2"
+    )
+
+
+def test_scene_normalizes_times_to_utc() -> None:
+    sentinel = scene()
+    assert sentinel.retrieved_at == datetime(2026, 3, 5, 17, tzinfo=UTC)
     assert sentinel.acquired_at == datetime(2026, 3, 5, 2, 13, tzinfo=UTC)
     assert sentinel.layer.provider is ImageryProvider.PLANETARY_COMPUTER
     assert sentinel.layer.instrument is Instrument.MSI
-    # Optional fields keep older (GIBS) scenes valid.
-    assert (scene().acquired_at, scene().cloud_cover, scene().granules) == (None, None, [])
 
 
 @pytest.mark.parametrize(
     "changes",
     [
-        {"provider": "nasa-gibs"},
         {"instrument": "VIIRS"},
+        {"media_type": "image/jpeg"},
         {"acquired_at": datetime(2026, 3, 4, 23, tzinfo=UTC)},
         {"cloud_cover": 101},
     ],
 )
-def test_sentinel_scene_rejects_inconsistent_events(changes: dict[str, object]) -> None:
+def test_scene_rejects_an_inconsistent_pass(changes: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        _ = sentinel_scene(**changes)
+        _ = scene(**changes)
 
 
 @pytest.mark.parametrize(

@@ -90,7 +90,22 @@ Use a Python stream-processing library (Quix Streams) for stateful and windowed 
 
 **Deliverable:** Detailed incident reports with satellite imagery, accessible from the dashboard.
 
-## Phase 10 — Air Quality Integration
+## Phase 10 — Burned Area Enrichment from Sentinel-2
+
+Derive burned areas from the Sentinel-2 short-wave infrared scenes, so incident reports show which parts of the map have burned rather than only where fires were detected.
+
+**Data flow:** `imagery.scenes` → Burned-area classifier → Kafka → Sink Worker → PostGIS → API → Incident report
+
+- [ ] Classify the burned pixels of each Sentinel-2 SWIR scene by colour (the dark red-brown of fresh burn scars), masking cloud, water, and pixels without data.
+- [ ] Vectorize the burned pixels into polygons with their area, and link them to the scene, pass time, and incident.
+- [ ] Publish the burned areas to a new schema-registered topic, keyed by scene, so they can be replayed and recomputed.
+- [ ] Project the burned areas into PostGIS and expose them per incident through the API.
+- [ ] Show the burned areas as a toggleable layer on the incident report's imagery map, with the burned area of each pass.
+- [ ] Document the classification method and its limitations (colour thresholds, cloud and shadow confusion, no pre-fire comparison).
+
+**Deliverable:** Burned areas computed from Sentinel-2 imagery, stored, and displayed as a layer in incident reports.
+
+## Phase 11 — Air Quality Integration
 
 Extend the monitoring platform with air-quality observations and forecasts to provide visibility into smoke and haze conditions associated with wildfire activity.
 
@@ -103,14 +118,14 @@ Extend the monitoring platform with air-quality observations and forecasts to pr
 
 **Deliverable:** Continuously updated air-quality data integrated into the monitoring dashboard and incident context.
 
-## Phase 11 — Watch Areas, Alerts, and Field Reports
+## Phase 12 — Watch Areas, Alerts, and Field Reports
 
 - [ ] Deliver alerts to the browser and to at least one external channel (email or webhook), each as an independent consumer group.
 - [ ] Let responders confirm or dismiss detections with field reports, and record alert acknowledgements as events.
 
 **Deliverable:** Event-driven alerting and two-way operational workflow.
 
-## Phase 12 — History and Archive
+## Phase 13 — History and Archive
 
 - [ ] Archive topics to object storage from the sink worker.
 - [ ] Add historical views and a time slider that replays the event history.
@@ -120,7 +135,7 @@ Extend the monitoring platform with air-quality observations and forecasts to pr
 
 **Deliverable:** First complete MVP with historical exploration, data export, and replay capabilities.
 
-## Phase 13 — AWS Deployment
+## Phase 14 — AWS Deployment
 
 - [ ] Provision infrastructure using AWS CDK.
 - [ ] Choose a cost-appropriate Kafka deployment (Amazon MSK Serverless or a self-managed single broker) and document the trade-off.

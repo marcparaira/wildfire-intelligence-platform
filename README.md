@@ -46,9 +46,8 @@ flowchart LR
     end
 
     %% Imagery Worker and its sources (shares packages/producers with the ingestor)
-    GIBS["NASA GIBS<br/>(VIIRS daily imagery)"]
     PC["Microsoft Planetary Computer<br/>(Sentinel-2 imagery)"]
-    IMG["Imagery Worker<br/>(GIBS, Sentinel-2)"]
+    IMG["Imagery Worker<br/>(Sentinel-2)"]
 
     %% Data Storage & Destinations
     DB[("PostgreSQL<br/>+ PostGIS")]
@@ -89,7 +88,6 @@ flowchart LR
 
     %% Imagery Worker: incidents in; images to the store, scene metadata back to Kafka
     T_DER -->|fire.incidents| IMG
-    GIBS --> IMG
     PC --> IMG
     IMG -->|imagery.scenes| T_DER
     IMG --> STORE
@@ -111,7 +109,7 @@ flowchart LR
     classDef streaming fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#92400e
     classDef storage fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
 
-    class FIRMS,METEO,GIBS,PC external
+    class FIRMS,METEO,PC external
     class ING,IMG done
     class T_SRC,T_DER,T_DLQ streaming
     class DB,STORE storage
@@ -139,7 +137,7 @@ apps/web/              React + TypeScript + OpenLayers dashboard
 packages/events/       Shared topics, H3 keys, event models, schemas, and codec
 packages/producers/    Shared runtime of the producer services: scheduling, publishing, log reads, HTTP
 services/ingestor/     Scheduled FIRMS and Open-Meteo producers
-services/imagery-worker/  Scheduled NASA GIBS and Sentinel-2 imagery of fire incidents
+services/imagery-worker/  Scheduled Sentinel-2 imagery of fire incidents
 services/sink-worker/  Kafka-to-PostGIS projections and dead-letter routing
 services/stream-processor/  Quix Streams jobs: incidents, enrichment and risk, hourly statistics
 infra/compose/         Local PostgreSQL/PostGIS initialization
@@ -182,7 +180,7 @@ Override ports with `WEB_PORT`, `API_PORT`, `KAFKA_UI_PORT`, `SCHEMA_REGISTRY_PO
   
   Filter incidents by status using the **Incident Status** buttons in the left sidebar (new, growing, stable).
 
-- **Incident reports:** **View Full Report** in the incident details opens a page for the incident (`#/incidents/<id>`). It shows the key figures, the daily evolution with its data table, the weather context, and the satellite imagery, drawn on a map with the incident's bounding box and that day's detections. To confirm a fire, the default layer is Sentinel-2 short-wave infrared (20 m; flames bright red to yellow, fresh burn scars dark red-brown) from the passes during, before, and after the incident's activity, with the pass time, cloud cover, and a colour key. NASA GIBS VIIRS true- and false-color daily composites (250-750 m) cover each day of activity. You can choose the layer, the date (days with detections are marked), and the imagery opacity.
+- **Incident reports:** **View Full Report** in the incident details opens a page for the incident (`#/incidents/<id>`). It shows the key figures, the daily evolution with its data table, the weather context, and the satellite imagery, drawn on a map with the incident's bounding box and that day's detections. To confirm a fire, it shows Sentinel-2 short-wave infrared imagery (20 m; flames bright red to yellow, fresh burn scars dark red-brown) from the passes during, before, and after the incident's activity, with the pass time, cloud cover, and a colour key. You can choose the date (days with detections are marked) and the imagery opacity.
 
 - **Hotspots** from NASA FIRMS (VIIRS SNPP, NOAA-20, NOAA-21, and MODIS) appear only when you select an incident. Each hotspot shows:
   - Radiative power (FRP) on a log scale
@@ -235,14 +233,13 @@ The dashboard lists active incidents for the selected area and draws them on the
 
 ## Satellite imagery
 
-The imagery worker (`services/imagery-worker`) runs apart from the ingestor: it reads incidents from `fire.incidents`, so it is downstream of the stream processor, and its runs are slow and image-heavy. Every hour it fetches NASA GIBS daily VIIRS composites and Sentinel-2 passes from Microsoft Planetary Computer over current incidents, writes the images to the `imagery-data` volume (mounted read-only into the API), and publishes their metadata to `imagery.scenes`. Neither source needs an API key.
+The imagery worker (`services/imagery-worker`) runs apart from the ingestor: it reads incidents from `fire.incidents`, so it is downstream of the stream processor, and its runs are slow and image-heavy. Every hour it fetches Sentinel-2 passes from Microsoft Planetary Computer over current incidents, writes the images to the `imagery-data` volume (mounted read-only into the API), and publishes their metadata to `imagery.scenes`. Planetary Computer needs no API key.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `IMAGERY_LAYERS` | Sentinel-2 SWIR, VIIRS true and false color | Comma-separated imagery layers; empty disables imagery |
+| `IMAGERY_LAYERS` | Sentinel-2 SWIR | Comma-separated imagery layers; empty disables imagery |
 | `IMAGERY_INTERVAL_MINUTES` | `60` | Imagery acquisition interval |
 | `IMAGERY_DAYS` | `5` | Days of incident activity to fetch imagery for, counted back from the newest activity (1–10) |
-| `IMAGERY_MAX_SCENES_PER_RUN` | `120` | GIBS images fetched per run; the rest wait for the next run |
 | `SENTINEL_MAX_SCENES_PER_RUN` | `200` | Sentinel-2 scenes rendered per run (5-10 s each per granule) |
 | `IMAGERY_DIR` | `data/imagery` (`/data/imagery` in the container) | Imagery store directory |
 

@@ -15,8 +15,8 @@ podman build -f services/ingestor/Containerfile .
 - `ingestor/` runs one scheduled, idempotent producer per external source:
   each FIRMS NRT product and Open-Meteo. It reads only external APIs and Kafka,
   and feeds the live map, so it stays small and is rarely restarted.
-- `imagery-worker/` acquires satellite imagery of current fire incidents: NASA
-  GIBS daily composites and Sentinel-2 passes from Microsoft Planetary Computer.
+- `imagery-worker/` acquires satellite imagery of current fire incidents:
+  Sentinel-2 passes from Microsoft Planetary Computer.
   It is downstream of the stream processor (it reads `fire.incidents`), writes
   the images to the imagery store volume, and publishes `imagery.scenes`. Its
   runs take minutes and use image processing (Pillow), so it runs apart from
