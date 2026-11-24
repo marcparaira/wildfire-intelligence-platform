@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import MapView from "./MapView";
 import type { EnrichmentLayer } from "./enrichmentLayers";
 import { EnrichmentLayers } from "./EnrichmentLayers";
-import { useIncidentDetail, useIncidents, type IncidentStatus } from "./incidents";
+import { reportIncidentId, useIncidentDetail, useIncidents, type IncidentStatus } from "./incidents";
 import { IncidentDetails } from "./IncidentPanel";
+import { IncidentReport } from "./IncidentReport";
 import { incidentStatuses } from "./incidents";
 import type { IncidentSummary } from "./incidents";
 import { FRP_HIGH_COLOR, FRP_LOW_COLOR, FRP_UNAVAILABLE_COLOR, frpPosition } from "./frp";
@@ -43,10 +44,13 @@ function regionQuery(region: RegionId | ""): URLSearchParams {
   return params;
 }
 
-type View = "map" | "status";
+type View = { kind: "map" } | { kind: "status" } | { kind: "report"; incidentId: string };
 
 function currentView(): View {
-  return window.location.hash === "#/status" ? "status" : "map";
+  const hash = window.location.hash;
+  if (hash === "#/status") return { kind: "status" };
+  const incidentId = reportIncidentId(hash);
+  return incidentId ? { kind: "report", incidentId } : { kind: "map" };
 }
 
 function useHashView(): View {
@@ -160,7 +164,7 @@ function App() {
   }, [filters]);
 
   const view = useHashView();
-  const pipeline = usePipelineStatus(view === "status" ? 15_000 : 60_000);
+  const pipeline = usePipelineStatus(view.kind === "status" ? 15_000 : 60_000);
 
   const liveQuery = useMemo(() => regionQuery(filters.region).toString(), [filters.region]);
   const incidents = useIncidents(liveQuery, refresh);
@@ -227,13 +231,15 @@ function App() {
       <header className="topbar">
         <div className="brand"><h1>Wildfire Intelligence Platform</h1></div>
         <nav className="topnav" aria-label="Views">
-          <a href="#/" aria-current={view === "map" ? "page" : undefined}>Map</a>
-          <a href="#/status" aria-current={view === "status" ? "page" : undefined}>Pipeline status</a>
+          <a href="#/" aria-current={view.kind === "map" ? "page" : undefined}>Map</a>
+          <a href="#/status" aria-current={view.kind === "status" ? "page" : undefined}>Pipeline status</a>
         </nav>
         <span className="header-source">NASA FIRMS · VIIRS &amp; MODIS NRT · Open-Meteo</span>
       </header>
 
-      {view === "status" ? <main className="status-main"><PipelineStatusPage state={pipeline} /></main> : <main className="workspace">
+      {view.kind === "status" && <main className="status-main"><PipelineStatusPage state={pipeline} /></main>}
+      {view.kind === "report" && <main className="status-main"><IncidentReport key={view.incidentId} incidentId={view.incidentId} /></main>}
+      {view.kind === "map" && <main className="workspace">
         <aside className="sidebar" aria-label="Filters" data-collapsed={!filtersOpen}>
           <div className="panel-heading panel-heading-toggle">
             <h2 hidden={!filtersOpen}>Filters</h2>

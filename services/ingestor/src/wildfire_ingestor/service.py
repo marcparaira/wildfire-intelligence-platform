@@ -1,4 +1,4 @@
-"""Ingestor service: scheduled FIRMS and Open-Meteo producers."""
+"""Ingestor service: scheduled FIRMS, Open-Meteo, NASA GIBS, and Sentinel-2 producers."""
 
 import argparse
 import logging
@@ -12,21 +12,32 @@ from kafka import KafkaProducer
 
 from wildfire_events.countries import selected_countries
 from wildfire_events.kafka import idempotent_producer
-from wildfire_events.models import WeatherProvider
+from wildfire_events.models import ImageryLayer, ImageryProvider, WeatherProvider
+from wildfire_events.registry import SchemaRegistry
 from wildfire_events.topics import WEATHER_FORECASTS
 from wildfire_ingestor.config import (
     PRODUCER_CLIENT_ID,
+    IncidentReader,
     Settings,
     configure_logging,
     connect_registry,
     detection_publisher,
+    load_acquired_scenes,
     load_published_detections,
+    scene_publisher,
     weather_publisher,
 )
 from wildfire_ingestor.detections import FirmsProducer
+from wildfire_ingestor.imagery import FileSceneStore, ImageryProducer
 from wildfire_ingestor.log import latest_publish_time
 from wildfire_ingestor.scheduler import ScheduledJob, run_forever
-from wildfire_ingestor.sources import FirmsClient, OpenMeteoClient
+from wildfire_ingestor.sentinel import SentinelProducer
+from wildfire_ingestor.sources import (
+    FirmsClient,
+    GibsClient,
+    OpenMeteoClient,
+    PlanetaryComputerClient,
+)
 from wildfire_ingestor.weather import WeatherProducer
 
 LOGGER = logging.getLogger(__name__)
@@ -38,7 +49,7 @@ class Arguments(argparse.Namespace):
 
 
 def build_jobs(settings: Settings, producer: KafkaProducer) -> list[ScheduledJob]:
-    """One job per configured FIRMS product, plus the weather job."""
+    """One job per configured FIRMS product, the weather job, and the imagery jobs."""
     published = load_published_detections(settings)
     registry = connect_registry(settings)
     detections = detection_publisher(producer, registry, published)
@@ -67,6 +78,64 @@ def build_jobs(settings: Settings, producer: KafkaProducer) -> list[ScheduledJob
             lambda: _seconds_until_weather_due(settings),
         )
     )
+    if settings.imagery_layers:
+        jobs.extend(imagery_jobs(settings, producer, registry))
+    else:
+        LOGGER.warning("IMAGERY_LAYERS is empty; the imagery producers are disabled")
+    return jobs
+
+
+def imagery_jobs(
+    settings: Settings, producer: KafkaProducer, registry: SchemaRegistry
+) -> list[ScheduledJob]:
+    """The NASA GIBS job for its configured layers, and the Sentinel-2 job if configured.
+
+    Both share the acquired scene IDs: their scene IDs never collide (they include
+    the layer), and reading the topic once is enough.
+    """
+    incidents = IncidentReader(settings, registry)
+    store = FileSceneStore(settings.imagery_dir)
+    publisher = scene_publisher(producer, registry)
+    acquired = load_acquired_scenes(settings)
+    jobs: list[ScheduledJob] = []
+    gibs_layers = tuple(
+        layer for layer in settings.imagery_layers if layer.provider is ImageryProvider.NASA_GIBS
+    )
+    if gibs_layers:
+        gibs = ImageryProducer(
+            incidents=incidents,
+            source=GibsClient(),
+            store=store,
+            publisher=publisher,
+            acquired=acquired,
+            layers=gibs_layers,
+            days=settings.imagery_days,
+            max_scenes_per_run=settings.imagery_max_scenes_per_run,
+        )
+        jobs.append(
+            ScheduledJob(
+                f"imagery:{ImageryProvider.NASA_GIBS}",
+                settings.imagery_interval.total_seconds(),
+                gibs.run_once,
+            )
+        )
+    if ImageryLayer.SENTINEL2_SWIR in settings.imagery_layers:
+        sentinel = SentinelProducer(
+            incidents=incidents,
+            source=PlanetaryComputerClient(),
+            store=store,
+            publisher=publisher,
+            acquired=acquired,
+            days=settings.imagery_days,
+            max_scenes_per_run=settings.sentinel_max_scenes_per_run,
+        )
+        jobs.append(
+            ScheduledJob(
+                f"imagery:{ImageryProvider.PLANETARY_COMPUTER}",
+                settings.imagery_interval.total_seconds(),
+                sentinel.run_once,
+            )
+        )
     return jobs
 
 

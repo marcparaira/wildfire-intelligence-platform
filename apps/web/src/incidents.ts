@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { Bounds } from "./hotspots";
-import { isRiskLevel } from "./conditions";
+import { formatUtc, HOTSPOT_LIMIT } from "./hotspots";
+import type { Bounds, Hotspot, HotspotResults } from "./hotspots";
+import { formatNumber, formatRisk, isRiskLevel } from "./conditions";
 import type { RiskSummary } from "./conditions";
 
 export type IncidentStatus = "new" | "growing" | "stable" | "inactive" | "merged";
@@ -70,6 +71,32 @@ export const incidentStatuses: Record<IncidentStatus, { label: string; color: st
   inactive: { label: "Inactive", color: "#7b8781" },
   merged: { label: "Merged", color: "#9aa59f" },
 };
+
+export function formatArea(km2: number): string {
+  return `${km2 < 10 ? km2.toFixed(1) : Math.round(km2).toLocaleString("en-US")} km²`;
+}
+
+/** Label and value of each key figure of an incident, shared by the sidebar and the report. */
+export function incidentFields(shown: IncidentSummary): [string, string][] {
+  const status = shown.previous_status && shown.previous_status !== shown.status
+    ? `${incidentStatuses[shown.status].label} (was ${incidentStatuses[shown.previous_status].label.toLowerCase()})`
+    : incidentStatuses[shown.status].label;
+  return [
+    ["Status", status],
+    ["First observed", formatUtc(shown.first_observed_at)],
+    ["Last observed", formatUtc(shown.last_observed_at)],
+    ["Detections", shown.detection_count.toLocaleString("en-US")],
+    ["Footprint", `${formatArea(shown.footprint_km2)} (${shown.footprint_cells.toLocaleString("en-US")} cells)`],
+    ["Maximum FRP", formatNumber(shown.max_frp_mw, "MW")],
+    ["Total FRP", formatNumber(shown.total_frp_mw, "MW")],
+    ["Products", shown.products.join(", ") || "—"],
+    ["Peak fire risk (24 h)", shown.peak_risk ? formatRisk(shown.peak_risk) : "Unknown"],
+  ];
+}
+
+export const INCIDENT_METHOD_NOTE =
+  "Detections clustered by space and time; the footprint counts ~5 km² grid cells with detections, not a mapped fire perimeter. " +
+  "Peak risk is the highest risk among the incident's detections in its last 24 hours of activity.";
 
 export function isIncidentStatus(value: unknown): value is IncidentStatus {
   return typeof value === "string" && Object.hasOwn(incidentStatuses, value);
@@ -289,6 +316,76 @@ export function useIncidentDetail(incidentId: string | null, revision: number | 
       });
     return () => controller.abort();
   }, [incidentId, revision]);
+
+  return state;
+}
+
+export interface IncidentDetectionsState {
+  items: Hotspot[];
+  truncated: boolean;
+  loading: boolean;
+  error: string;
+}
+
+/** Report links use the hash router: `#/incidents/<id>`. */
+export function incidentReportHref(incidentId: string): string {
+  return `#/incidents/${encodeURIComponent(incidentId)}`;
+}
+
+/** The incident ID of a report hash, or null for any other hash. */
+export function reportIncidentId(hash: string): string | null {
+  const match = /^#\/incidents\/([^/]+)$/.exec(hash);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detections inside the incident's bounding box during its days of activity (UTC),
+ * including cross-sensor duplicates so each day shows every satellite's view.
+ */
+export function useIncidentDetections(incident: IncidentSummary | null): IncidentDetectionsState {
+  const [state, setState] = useState<IncidentDetectionsState>({ items: [], truncated: false, loading: false, error: "" });
+  const [west, south, east, north] = incident?.bbox ?? [0, 0, 0, 0];
+  const query = incident
+    ? new URLSearchParams({
+        west: String(west),
+        south: String(south),
+        east: String(east),
+        north: String(north),
+        date_from: incident.first_observed_at.slice(0, 10),
+        date_to: incident.last_observed_at.slice(0, 10),
+        include_duplicates: "true",
+        limit: String(HOTSPOT_LIMIT),
+      }).toString()
+    : "";
+
+  useEffect(() => {
+    if (!query) {
+      setState({ items: [], truncated: false, loading: false, error: "" });
+      return;
+    }
+    const controller = new AbortController();
+    setState((previous) => ({ ...previous, loading: true, error: "" }));
+    fetch(`/api/hotspots?${query}`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        return response.json() as Promise<HotspotResults>;
+      })
+      .then((data) => {
+        if (!Array.isArray(data.items)) throw new Error("Unexpected response");
+        setState({ items: data.items, truncated: Boolean(data.truncated), loading: false, error: "" });
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        const message = reason instanceof Error ? reason.message : "Unable to load detections";
+        setState({ items: [], truncated: false, loading: false, error: message });
+      });
+    return () => controller.abort();
+  }, [query]);
 
   return state;
 }

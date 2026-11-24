@@ -76,11 +76,15 @@ DETECTIONS_ENRICHED = TopicSpec("detections.enriched", config=_retained(RETAIN_F
 # Derived from detections.enriched. Keyed by "<country>|<hour start>"; compaction
 # keeps the final count of each country and hour.
 STATS_HOURLY = TopicSpec("stats.hourly", config=_compacted())
+# Metadata of satellite images fetched for incident areas; the image bytes live in the
+# imagery store (claim check). Keyed by scene ID; compaction keeps the latest
+# acquisition of each scene.
+SATELLITE_SCENES = TopicSpec("imagery.scenes", config=_compacted())
 STREAM_PROCESSOR_DLQ = TopicSpec(
     "stream-processor.dlq", partitions=1, config=_retained(str(DEAD_LETTER_RETENTION_MS))
 )
 
-SOURCE_TOPICS = (FIRMS_DETECTIONS, WEATHER_FORECASTS)
+SOURCE_TOPICS = (FIRMS_DETECTIONS, WEATHER_FORECASTS, SATELLITE_SCENES)
 DERIVED_TOPICS = (FIRE_INCIDENTS, DETECTIONS_ENRICHED, STATS_HOURLY)
 DEAD_LETTER_TOPICS = (SINK_WORKER_DLQ, STREAM_PROCESSOR_DLQ)
 ALL_TOPICS = (*SOURCE_TOPICS, *DERIVED_TOPICS, *DEAD_LETTER_TOPICS)
@@ -91,6 +95,7 @@ SINK_WEATHER_GROUP = "sink-worker.postgis.weather"
 SINK_INCIDENTS_GROUP = "sink-worker.postgis.incidents"
 SINK_ENRICHMENT_GROUP = "sink-worker.postgis.enrichment"
 SINK_STATISTICS_GROUP = "sink-worker.postgis.statistics"
+SINK_IMAGERY_GROUP = "sink-worker.postgis.imagery"
 INCIDENTS_GROUP = "stream-processor.incidents"
 ENRICHMENT_GROUP = "stream-processor.enrichment"
 STATISTICS_GROUP = "stream-processor.statistics"
@@ -100,6 +105,7 @@ CONSUMER_GROUPS: dict[str, tuple[str, ...]] = {
     SINK_INCIDENTS_GROUP: (FIRE_INCIDENTS.name,),
     SINK_ENRICHMENT_GROUP: (DETECTIONS_ENRICHED.name,),
     SINK_STATISTICS_GROUP: (STATS_HOURLY.name,),
+    SINK_IMAGERY_GROUP: (SATELLITE_SCENES.name,),
     INCIDENTS_GROUP: (FIRMS_DETECTIONS.name,),
     ENRICHMENT_GROUP: (FIRMS_DETECTIONS.name, WEATHER_FORECASTS.name),
     STATISTICS_GROUP: (DETECTIONS_ENRICHED.name,),
@@ -110,6 +116,7 @@ SINK_WORKER_GROUPS = (
     SINK_INCIDENTS_GROUP,
     SINK_ENRICHMENT_GROUP,
     SINK_STATISTICS_GROUP,
+    SINK_IMAGERY_GROUP,
 )
 STREAM_PROCESSOR_GROUPS = (INCIDENTS_GROUP, ENRICHMENT_GROUP, STATISTICS_GROUP)
 

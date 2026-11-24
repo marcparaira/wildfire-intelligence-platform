@@ -5,7 +5,7 @@ Skipped unless INGESTOR_TEST_KAFKA and INGESTOR_TEST_SCHEMA_REGISTRY are set.
 
 import os
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from http.client import HTTPResponse
 from pathlib import Path
 from typing import cast
@@ -19,7 +19,7 @@ from wildfire_events.kafka import idempotent_producer
 from wildfire_events.models import FirmsDetection, FirmsProduct
 from wildfire_events.registry import SchemaRegistry
 from wildfire_ingestor.detections import parse_csv
-from wildfire_ingestor.log import latest_publish_time, load_published_events
+from wildfire_ingestor.log import latest_publish_time, latest_values, load_published_events
 from wildfire_ingestor.publisher import PublishedEvents, Publisher
 
 KAFKA = os.environ.get("INGESTOR_TEST_KAFKA", "")
@@ -67,3 +67,23 @@ def test_a_restarted_ingestor_does_not_republish_what_is_in_the_log() -> None:
                     pass
             except OSError:
                 pass  # Best-effort cleanup; the subject may already be gone.
+
+
+@pytest.mark.skipif(not KAFKA, reason="set INGESTOR_TEST_KAFKA")
+def test_latest_values_reads_a_topic_like_a_table() -> None:
+    topic = f"ingestor-test-{uuid.uuid4().hex[:12]}"
+    admin = KafkaAdminClient(bootstrap_servers=KAFKA)
+    admin.create_topics([NewTopic(topic, 3, 1)])  # pyright: ignore[reportUnknownMemberType]
+    producer = idempotent_producer(KAFKA, "ingestor-test")
+    try:
+        assert latest_values(KAFKA, topic) == {}
+        for key, value in [(b"a", b"1"), (b"b", b"1"), (b"a", b"2"), (b"b", None), (None, b"x")]:
+            _ = producer.send(topic, key=key, value=value)
+        producer.flush()
+        assert latest_values(KAFKA, topic) == {b"a": b"2", b"b": None}
+        future = datetime.now(UTC) + timedelta(hours=1)
+        assert latest_values(KAFKA, topic, since=future) == {}
+    finally:
+        producer.close()
+        admin.delete_topics([topic])  # pyright: ignore[reportUnknownMemberType]
+        admin.close()

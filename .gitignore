@@ -18,6 +18,8 @@ coverage/
 .firms-map-key
 postgres-data/
 kafka-data/
+# Imagery store of ingestor and API runs outside containers.
+/data/
 
 # Editors and operating systems
 .DS_Store

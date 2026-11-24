@@ -18,7 +18,7 @@ from psycopg import sql
 
 from wildfire_events.kafka import admin_client
 from wildfire_events.topics import SINK_WORKER_GROUPS
-from wildfire_sink import detections, enrichment, incidents, statistics, weather
+from wildfire_sink import detections, enrichment, imagery, incidents, statistics, weather
 from wildfire_sink.service import Settings
 
 LOGGER = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ TABLES = (
     incidents.TABLE,
     enrichment.TABLE,
     statistics.TABLE,
+    imagery.TABLE,
 )
 GROUPS = list(SINK_WORKER_GROUPS)
 # Fail fast: this is an interactive command, not a service waiting for the stack.

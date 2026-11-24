@@ -14,3 +14,12 @@
 - Hourly statistics count cross-sensor observations of the same fire separately, and drop detections more than 3 days late.
 - **Frontend map zoom:** When clicking an incident on the map, the view briefly zooms out before zooming to the incident center. This is a known UI/UX issue being tracked.
 - **Growth over time chart:** The chart displays all available daily data for each incident since it was first detected. Historical data is retained in the database across `podman compose` restarts (via the `postgres-data` volume), but test/development datasets may only contain recent fires.
+- VIIRS imagery comes from daily composites at 250-750 m: the acquisition time within the day is not known, clouds or smoke often hide the ground, and fires smaller than a pixel (most of them) cannot be seen in it.
+- Sentinel-2 passes every 2-5 days in the late morning and its images arrive 1-3 days later. A fire detected by VIIRS in the afternoon or at night may not be burning at any pass; it can then only be confirmed by a fresh burn scar in a later clear pass. Cloud hides the ground (smoke does not), and granules over 90% cloud are not fetched.
+- The Sentinel-2 colour stretch assumes processing baseline 04.00 or later (from 2022), which adds an offset of 1000; older scenes would look too dark.
+- The Sentinel-2 `cloud_cover` is that of the 110 km source granules, not of the tile shown; a tile can be clearer or cloudier.
+- Sentinel-2 imagery depends on Microsoft Planetary Computer's free STAC and rendering APIs, which have no service-level guarantee; rendering takes 5-10 s per granule, so a backlog can take several runs to catch up.
+- Daily VIIRS imagery is only fetched for an incident's days of activity within the `IMAGERY_DAYS` days up to the newest incident activity; Sentinel-2 passes also for 6 days before and after them.
+- The imagery job reads the whole `fire.incidents` topic on every run. That takes about a second for a few thousand incidents, but grows with the number of incidents kept.
+- The imagery store is a local volume. Scenes listed in `imagery.scenes` are not refetched if their files are lost, and replaying the topic on another machine does not bring the images.
+- The empty-image check is a size heuristic; a nearly uniform real image (for example solid cloud at low resolution) could be skipped and retried.

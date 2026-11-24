@@ -15,8 +15,12 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# /data/imagery is the imagery store; a new named volume mounted there takes over
+# its ownership, so the unprivileged user can write images.
 RUN apk add --no-cache libstdc++ \
-    && addgroup -S app && adduser -S -G app app
+    && addgroup -S app && adduser -S -G app app \
+    && mkdir -p /data/imagery && chown app:app /data/imagery
 COPY --from=build /opt/venv /opt/venv
+ENV IMAGERY_DIR=/data/imagery
 USER app
 CMD ["python", "-m", "wildfire_ingestor"]

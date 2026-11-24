@@ -19,6 +19,11 @@ vi.mock("./incidents", async (importOriginal) => ({
   useIncidentDetail: () => incidentDetailState.current,
 }));
 
+// The report has its own tests; here only the route to it matters.
+vi.mock("./IncidentReport", () => ({
+  IncidentReport: ({ incidentId }: { incidentId: string }) => <article aria-label="Incident report">Report for {incidentId}</article>,
+}));
+
 vi.mock("./pipeline", async (importOriginal) => ({
   ...await importOriginal<typeof import("./pipeline")>(),
   usePipelineStatus: () => pipelineState.current,
@@ -361,6 +366,27 @@ describe("hotspot dashboard", () => {
 
     // Status filter still shows incidents
     expect(map).toHaveAttribute("data-incident-count", "1");
+  });
+
+  it("opens the full report of the selected incident and returns to the map", async () => {
+    const incident = incidentSummary();
+    incidentState.current = { items: [incident], truncated: false, loading: false, error: "" };
+    incidentDetailState.current = { incident: incidentDetail(), loading: false, error: "" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ items: [observation], truncated: false }) }));
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Map incident 0b6f3a52" }));
+
+    const report = screen.getByRole("link", { name: "View Full Report" });
+    expect(report).toHaveAttribute("href", `#/incidents/${incident.incident_id}`);
+    window.location.hash = `#/incidents/${incident.incident_id}`;
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    expect(await screen.findByRole("article", { name: "Incident report" })).toHaveTextContent(`Report for ${incident.incident_id}`);
+    expect(screen.queryByLabelText("Hotspot map")).not.toBeInTheDocument();
+
+    window.location.hash = "#/";
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    const map = await screen.findByLabelText("Hotspot map");
+    expect(map).toHaveAttribute("data-selected-incident", incident.incident_id);
   });
 
   it("shows the country, fire risk, and weather of an enriched detection", async () => {

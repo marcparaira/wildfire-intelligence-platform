@@ -17,12 +17,14 @@ from wildfire_events.models import (
     FireIncident,
     FirmsDetection,
     HourlyDetectionStats,
+    SatelliteScene,
     WeatherForecast,
 )
 from wildfire_events.topics import (
     DETECTIONS_ENRICHED,
     FIRE_INCIDENTS,
     FIRMS_DETECTIONS,
+    SATELLITE_SCENES,
     STATS_HOURLY,
     WEATHER_FORECASTS,
     value_subject,
@@ -36,6 +38,7 @@ SUBJECT_MODELS: dict[str, type[BaseModel]] = {
     value_subject(FIRE_INCIDENTS.name): FireIncident,
     value_subject(DETECTIONS_ENRICHED.name): EnrichedDetection,
     value_subject(STATS_HOURLY.name): HourlyDetectionStats,
+    value_subject(SATELLITE_SCENES.name): SatelliteScene,
 }
 
 

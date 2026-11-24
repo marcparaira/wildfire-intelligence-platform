@@ -1,0 +1,188 @@
+{
+  "additionalProperties": false,
+  "description": "One satellite image tile in the imagery store, with its time and geography.\n\nThe event is a claim check: the image itself is written to the imagery store\nunder ``storage_key`` before the event is published, and is never changed (keys\ncontain the content hash). Keyed by ``scene_id``; a later acquisition of the\nsame scene replaces the earlier one in the compacted topic.",
+  "properties": {
+    "acquired_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Sensing time of a single pass; None for daily composites",
+      "title": "Acquired At"
+    },
+    "acquisition_date": {
+      "description": "UTC day of the daily composite (overpasses within it are not distinguished), or of the pass (see acquired_at)",
+      "format": "date",
+      "title": "Acquisition Date",
+      "type": "string"
+    },
+    "byte_size": {
+      "minimum": 1,
+      "title": "Byte Size",
+      "type": "integer"
+    },
+    "cloud_cover": {
+      "anyOf": [
+        {
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Cloud cover of the source granules in percent (not of this tile alone)",
+      "title": "Cloud Cover"
+    },
+    "east": {
+      "maximum": 180,
+      "minimum": -180,
+      "title": "East",
+      "type": "number"
+    },
+    "granules": {
+      "description": "Provider IDs of the source granules composited into the image",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 16,
+      "title": "Granules",
+      "type": "array"
+    },
+    "height": {
+      "description": "Image height in pixels",
+      "minimum": 1,
+      "title": "Height",
+      "type": "integer"
+    },
+    "instrument": {
+      "enum": [
+        "VIIRS",
+        "MODIS",
+        "MSI"
+      ],
+      "title": "Instrument",
+      "type": "string"
+    },
+    "layer": {
+      "enum": [
+        "VIIRS_NOAA20_CorrectedReflectance_TrueColor",
+        "VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1",
+        "Sentinel-2_L2A_SWIR_B12-B8A-B04"
+      ],
+      "title": "Layer",
+      "type": "string"
+    },
+    "media_type": {
+      "enum": [
+        "image/jpeg",
+        "image/webp"
+      ],
+      "title": "Media Type",
+      "type": "string"
+    },
+    "north": {
+      "maximum": 90,
+      "minimum": -90,
+      "title": "North",
+      "type": "number"
+    },
+    "platform": {
+      "maxLength": 32,
+      "minLength": 1,
+      "title": "Platform",
+      "type": "string"
+    },
+    "provider": {
+      "enum": [
+        "nasa-gibs",
+        "planetary-computer"
+      ],
+      "title": "Provider",
+      "type": "string"
+    },
+    "retrieved_at": {
+      "format": "date-time",
+      "title": "Retrieved At",
+      "type": "string"
+    },
+    "scene_id": {
+      "description": "Also the Kafka message key; see scene_id()",
+      "format": "uuid",
+      "title": "Scene Id",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "source_url": {
+      "description": "Request that returned the image",
+      "minLength": 1,
+      "title": "Source Url",
+      "type": "string"
+    },
+    "south": {
+      "maximum": 90,
+      "minimum": -90,
+      "title": "South",
+      "type": "number"
+    },
+    "storage_key": {
+      "description": "Path of the image in the imagery store",
+      "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$",
+      "title": "Storage Key",
+      "type": "string"
+    },
+    "tile": {
+      "description": "Grid tile 'x<column>y<row>' of the imagery producer's tile grid",
+      "pattern": "^x-?\\d+y-?\\d+$",
+      "title": "Tile",
+      "type": "string"
+    },
+    "west": {
+      "maximum": 180,
+      "minimum": -180,
+      "title": "West",
+      "type": "number"
+    },
+    "width": {
+      "description": "Image width in pixels",
+      "minimum": 1,
+      "title": "Width",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "scene_id",
+    "provider",
+    "layer",
+    "instrument",
+    "platform",
+    "acquisition_date",
+    "tile",
+    "west",
+    "south",
+    "east",
+    "north",
+    "width",
+    "height",
+    "media_type",
+    "byte_size",
+    "sha256",
+    "storage_key",
+    "source_url",
+    "retrieved_at"
+  ],
+  "title": "SatelliteScene",
+  "type": "object"
+}

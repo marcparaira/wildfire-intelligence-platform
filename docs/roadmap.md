@@ -47,13 +47,10 @@
 
 ## Phase 6 — Streaming Backbone
 
-Make Kafka the system of record: every observation, forecast, and user action
-is an event, and storage, alerts, and the live map are projections of the log.
+Make Kafka the system of record: every observation, forecast, and user action is an event, and storage, alerts, and the live map are projections of the log.
 
-- [x] Replace on-demand ingestion with scheduled producers for all FIRMS NRT
-  products (VIIRS SNPP, NOAA-20, NOAA-21, and MODIS).
-- [x] Publish Open-Meteo forecasts to Kafka on a schedule; keep the latest forecast
-  per grid cell in a compacted topic instead of fetching at request time.
+- [x] Replace on-demand ingestion with scheduled producers for all FIRMS NRT products (VIIRS SNPP, NOAA-20, NOAA-21, and MODIS).
+- [x] Publish Open-Meteo forecasts to Kafka on a schedule; keep the latest forecast per grid cell in a compacted topic instead of fetching at request time.
 - [x] Key events by H3 cell so spatially related data shares a partition.
 - [x] Add a schema registry (Apicurio or Karapace) and register event schemas.
 - [x] Route invalid events to dead-letter topics instead of stopping consumers.
@@ -74,8 +71,7 @@ is an event, and storage, alerts, and the live map are projections of the log.
 
 ## Phase 8 — Stream Processing
 
-Use a Python stream-processing library (Quix Streams) for stateful and
-windowed processing.
+Use a Python stream-processing library (Quix Streams) for stateful and windowed processing.
 
 - [x] Cluster detections into fire incidents by space and time, and track each incident's lifecycle (new, growing, stable, inactive) in `fire.incidents`.
 - [x] Enrich detections with the latest weather for their grid cell.
@@ -85,41 +81,51 @@ windowed processing.
 
 **Deliverable:** Incident-level situational awareness derived from the stream.
 
-## Phase 9 — Watch Areas, Alerts, and Field Reports
+## Phase 9 — Incident Reports & Satellite Imagery
 
-- Let users draw watch areas, stored as events in a compacted topic.
-- Match incidents and risk conditions against watch areas and publish alerts.
-- Deliver alerts to the browser and to at least one external channel (email or
-  webhook), each as an independent consumer group.
-- Let responders confirm or dismiss detections with field reports, and record
-  alert acknowledgements as events.
+- [x] Create a dedicated report page for each existing fire incident, showing incident details, fire evolution, and weather context.
+- [x] Add a **"View Full Report"** button to the right sidebar for the selected incident.
+- [x] Integrate satellite imagery acquisition and storage, including timestamps and geographic metadata.
+- [x] Display satellite imagery in the incident report with map overlays and acquisition dates.
+
+**Deliverable:** Detailed incident reports with satellite imagery, accessible from the dashboard.
+
+## Phase 10 — Air Quality Integration
+
+Extend the monitoring platform with air-quality observations and forecasts to provide visibility into smoke and haze conditions associated with wildfire activity.
+
+- [ ] Integrate air-quality data sources such as Open-Meteo Air Quality and OpenAQ.
+- [ ] Implement scheduled acquisition of air-quality observations and forecasts.
+- [ ] Publish normalized air-quality data to Kafka and persist the relevant measurements and geographic information in PostGIS.
+- [ ] Add a PM2.5 concentration and haze overlay to the dashboard map.
+- [ ] Display air-quality measurements, timestamps, and source freshness.
+- [ ] Provide air-quality context for incidents where geographically relevant data is available.
+
+**Deliverable:** Continuously updated air-quality data integrated into the monitoring dashboard and incident context.
+
+## Phase 11 — Watch Areas, Alerts, and Field Reports
+
+- [ ] Deliver alerts to the browser and to at least one external channel (email or webhook), each as an independent consumer group.
+- [ ] Let responders confirm or dismiss detections with field reports, and record alert acknowledgements as events.
 
 **Deliverable:** Event-driven alerting and two-way operational workflow.
 
-## Phase 10 — Air Quality, History, and Archive
+## Phase 12 — History and Archive
 
-- Ingest air-quality data (Open-Meteo Air Quality and OpenAQ) and add a PM2.5
-  haze overlay.
-- Archive topics to object storage from the sink worker.
-- Add historical views and a time slider that replays the event history.
-- Export selected datasets and incident summaries.
-- Add a clearly labeled simulation producer that replays archived detections
-  at accelerated speed for demonstrations.
-- Stretch: ingest the JAXA Himawari-9 wildfire product (10-minute
-  geostationary detections).
-- Side task: add a satellite imagery basemap (for example, NASA GIBS) with
-  layer and opacity controls.
+- [ ] Archive topics to object storage from the sink worker.
+- [ ] Add historical views and a time slider that replays the event history.
+- [ ] Export selected datasets and incident summaries.
+- [ ] Add a clearly labeled simulation producer that replays archived detections at accelerated speed for demonstrations.
+- [ ] Stretch: ingest the JAXA Himawari-9 wildfire product (10-minute geostationary detections).
 
-**Deliverable:** First complete MVP.
+**Deliverable:** First complete MVP with historical exploration, data export, and replay capabilities.
 
-## Phase 11 — AWS Deployment
+## Phase 13 — AWS Deployment
 
-- Provision infrastructure using AWS CDK.
-- Choose a cost-appropriate Kafka deployment (Amazon MSK Serverless or a
-  self-managed single broker) and document the trade-off.
-- Build and publish production container images.
-- Deploy the application and add monitoring, including consumer lag, and
-  operational documentation.
-- Publish a live demo and screenshots.
+- [ ] Provision infrastructure using AWS CDK.
+- [ ] Choose a cost-appropriate Kafka deployment (Amazon MSK Serverless or a self-managed single broker) and document the trade-off.
+- [ ] Build and publish production container images.
+- [ ] Deploy the application and add monitoring, including consumer lag, and operational documentation.
+- [ ] Publish a live demo and screenshots.
 
 **Deliverable:** Publicly demonstrable portfolio project.

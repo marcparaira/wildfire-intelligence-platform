@@ -14,6 +14,7 @@ by the stream processor and can be recomputed the same way.
 | `fire.incidents` | Incident ID | 6 | Compacted | Latest `FireIncident` revision per incident |
 | `detections.enriched` | H3 cell, resolution 2 | 6 | Unlimited | One `EnrichedDetection` (country, weather, risk) per detection |
 | `stats.hourly` | `<country>\|<hour start>` | 6 | Compacted | Latest `HourlyDetectionStats` per country and UTC hour |
+| `imagery.scenes` | Scene ID | 6 | Compacted | Latest `SatelliteScene` (image metadata) per layer, day (or Sentinel-2 pass), and tile |
 | `sink-worker.dlq` | Original key | 1 | 30 days | Records the sink worker could not process |
 | `stream-processor.dlq` | Original key | 1 | 30 days | Records the stream processor could not decode |
 
@@ -96,6 +97,7 @@ record more than once.
 | Incidents | `sink-worker.postgis.incidents` | `fire_incidents` |
 | Enrichment | `sink-worker.postgis.enrichment` | `detection_conditions` |
 | Statistics | `sink-worker.postgis.statistics` | `detection_stats_hourly` |
+| Imagery | `sink-worker.postgis.imagery` | `satellite_scenes` |
 
 Each job has its own consumer group and database connection, so the jobs track
 their offsets independently. The weather projection ignores a forecast that is
@@ -104,8 +106,9 @@ tombstone (a record with a null value). The incidents projection keeps the
 latest revision of each incident and never replaces it with an older one.
 `detection_conditions` holds one row per detection `event_id`; it has no
 foreign key to `fire_detections` because the two jobs run independently. The
-statistics projection keeps the latest value per country and hour. Incident
-and statistics tombstones delete the row.
+statistics projection keeps the latest value per country and hour. The imagery
+projection keeps the newest acquisition of each scene, with the tile as a
+`footprint` polygon. Incident, statistics, and scene tombstones delete the row.
 
 ## Stream processor
 
@@ -311,6 +314,76 @@ Consumer lag includes the stream processor's groups; the enrichment group has a 
 means that consumer is stopped or failing; check
 `podman compose logs sink-worker` or `podman compose logs stream-processor`. A consumer group in the `Empty` state has no
 running members. After a replay, lag counts down to zero.
+
+## Satellite imagery
+
+The ingestor's imagery job (every `IMAGERY_INTERVAL_MINUTES`, default 60) reads
+the latest revision of every incident from the compacted `fire.incidents` topic
+and fetches NASA GIBS daily corrected-reflectance composites for the incident
+areas. GIBS needs no API key.
+
+- **Tiles.** Images are 512 × 512 px tiles of a fixed 0.5° grid (`x<column>y<row>`,
+  counted from 0°, 0°), not per-incident crops. Neighbouring incidents share
+  tiles, and a growing incident only adds the tiles it newly reaches. A scene is
+  one layer on one UTC day for one tile; its ID is a UUIDv5 of the three, so it
+  is acquired once.
+- **What is fetched.** Every non-merged incident, on each of its days with
+  detections among the last `IMAGERY_DAYS` (default 5). The days count back from
+  the newest incident activity, not from today, so stale or replayed data still
+  gets imagery. Images come in the layers of
+  `IMAGERY_LAYERS`: VIIRS NOAA-20 true color and false color (bands M11-I2-I1).
+  The incident's bounding box is grown by 0.05°. The most recent days go first,
+  at most `IMAGERY_MAX_SCENES_PER_RUN` (default 120) per run; the rest wait for
+  the next run.
+- **When.** A day is requested from 12:00 UTC, when the composite over the region
+  should be complete. GIBS answers a day or area without data with a uniform
+  frame. Such near-empty JPEGs (under 0.01 bytes per pixel) are not stored and
+  are retried after 6 hours; failed requests are retried after 1 hour.
+- **Claim check.** The image is written to the imagery store first, under
+  `<layer>/<day>/<tile>-<sha256 prefix>.jpg`; then its `SatelliteScene`
+  metadata (bounds, size, acquisition day, retrieval time, hash, store key, and
+  source URL) is published. The image never travels through Kafka. Locally,
+  the store is the `imagery-data` volume, written by the ingestor and mounted
+  read-only into the API (`IMAGERY_DIR`).
+- **Restarts.** At startup the ingestor reads the scene IDs already in
+  `imagery.scenes` and does not fetch them again. Deleting the volume therefore
+  does not refetch existing scenes; their images return 404 until the scenes are
+  removed from the topic.
+
+### Sentinel-2 short-wave infrared
+
+A second job (also every `IMAGERY_INTERVAL_MINUTES`, enabled when
+`IMAGERY_LAYERS` includes `Sentinel-2_L2A_SWIR_B12-B8A-B04`) acquires the imagery
+used to confirm fires: Sentinel-2 L2A bands B12, B8A, and B04 at 20 m, from
+Microsoft Planetary Computer (no API key). Flames are bright in B12, burn scars
+lose B8A, and smoke is thin at these wavelengths. The code is in
+`wildfire_ingestor.sentinel`.
+
+- **Which passes.** The same incidents and tiles as above. Sentinel-2 passes
+  every 2-5 days, so passes from 6 days (`SENTINEL_CONTEXT_DAYS`) before an
+  incident's first to 6 days after its last day of activity are taken: those
+  during the activity first (the fire may be burning), then after it (the burn
+  scar), then before it (the baseline), most recent first. Activity up to 6 days
+  before the `IMAGERY_DAYS` window still counts, so its later passes are found.
+- **Search.** One STAC search per run (`POST /api/stac/v1/search`) covers every
+  needed tile (neighbours in a row merged into strips) and the whole date range,
+  without granules over 90% cloud, following the `next` pages.
+- **Scenes.** A scene is one tile on one pass day, with the same tile grid and
+  scene ID as above. Each granule (110 km MGRS tile) of the pass that reaches the
+  tile is rendered over the tile at 2048 × 2048 px (about 27 m) by the Planetary
+  Computer data API, and they are composited, clearest on top, into one WebP
+  whose area without data stays transparent. Scenes with under 1% coverage are
+  not stored and not retried until a restart; failed ones are retried after an
+  hour. At most `SENTINEL_MAX_SCENES_PER_RUN` (default 40) per run.
+- **Metadata.** `SatelliteScene` also carries `acquired_at` (the pass's sensing
+  time), `cloud_cover` (mean of the granules), and `granules` (their IDs); these
+  are null or empty for the daily GIBS composites.
+
+The API lists an incident's scenes with `GET /api/incidents/{id}/imagery` (tiles
+intersecting its grown bounding box, from its first to its last UTC day of
+activity, and for Sentinel-2 from 6 days before to 6 days after) and serves each
+image with `GET /api/imagery/{scene_id}`. Images never change, so the API sends
+them with an immutable cache header.
 
 ## Rebuilding PostGIS by replaying the topics
 

@@ -1,5 +1,5 @@
 import struct
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from enum import StrEnum
 from typing import get_args
 
@@ -13,20 +13,27 @@ from wildfire_events.countries import Country, CountryLiteral, selected_countrie
 from wildfire_events.models import (
     FireRisk,
     FirmsDetection,
+    FirmsInstrumentLiteral,
     FirmsProduct,
     FirmsProductLiteral,
     HourlyDetectionStats,
     HourlyWeather,
+    ImageryLayer,
+    ImageryLayerLiteral,
+    ImageryProvider,
+    ImageryProviderLiteral,
     IncidentStatus,
     IncidentStatusLiteral,
     Instrument,
     InstrumentLiteral,
     RiskLevel,
     RiskLevelLiteral,
+    SatelliteScene,
     WeatherForecast,
     WeatherProvider,
     WeatherProviderLiteral,
     detection_event_id,
+    scene_id,
 )
 
 OBSERVED = datetime(2026, 3, 5, 0, 7, tzinfo=UTC)
@@ -82,6 +89,8 @@ def test_checked_in_schemas_match_models() -> None:
         (IncidentStatusLiteral, IncidentStatus),
         (RiskLevelLiteral, RiskLevel),
         (CountryLiteral, Country),
+        (ImageryProviderLiteral, ImageryProvider),
+        (ImageryLayerLiteral, ImageryLayer),
     ],
 )
 def test_wire_literals_cover_their_enums(literal: object, enum: type[StrEnum]) -> None:
@@ -90,7 +99,7 @@ def test_wire_literals_cover_their_enums(literal: object, enum: type[StrEnum]) -
 
 def test_products_belong_to_their_instrument() -> None:
     assert FirmsProduct.MODIS_NRT.instrument is Instrument.MODIS
-    assert {product.instrument for product in FirmsProduct} == set(Instrument)
+    assert {product.instrument for product in FirmsProduct} == set(get_args(FirmsInstrumentLiteral))
 
 
 def test_event_id_is_stable_across_coordinate_formatting_and_time_zones() -> None:
@@ -232,3 +241,107 @@ def test_hourly_stats_invariants_and_key() -> None:
         _ = HourlyDetectionStats.model_validate(
             {**values, "detections_with_frp": 0, "total_frp_mw": 0}
         )
+
+
+SCENE_DAY = date(2026, 3, 5)
+
+
+def scene(**changes: object) -> SatelliteScene:
+    layer = ImageryLayer.VIIRS_NOAA20_TRUE_COLOR
+    values: dict[str, object] = {
+        "scene_id": scene_id(layer, SCENE_DAY, "x228y2"),
+        "provider": "nasa-gibs",
+        "layer": layer,
+        "instrument": "VIIRS",
+        "platform": "NOAA-20",
+        "acquisition_date": SCENE_DAY,
+        "tile": "x228y2",
+        "west": 114.0,
+        "south": 1.0,
+        "east": 114.5,
+        "north": 1.5,
+        "width": 512,
+        "height": 512,
+        "media_type": "image/jpeg",
+        "byte_size": 31_000,
+        "sha256": "ab" * 32,
+        "storage_key": f"{layer}/2026-03-05/x228y2-abababababababab.jpg",
+        "source_url": "https://gibs.example/wms",
+        "retrieved_at": datetime(2026, 3, 6, 1, tzinfo=timezone(timedelta(hours=8))),
+    }
+    values.update(changes)
+    return SatelliteScene.model_validate(values)
+
+
+def test_scene_id_is_deterministic_per_layer_day_and_tile() -> None:
+    layer = ImageryLayer.VIIRS_NOAA20_FALSE_COLOR
+    assert scene_id(layer, SCENE_DAY, "x1y2") == scene_id(layer, SCENE_DAY, "x1y2")
+    assert scene_id(layer, SCENE_DAY, "x1y2") != scene_id(layer, SCENE_DAY, "x2y1")
+    assert scene_id(layer, SCENE_DAY, "x1y2") != scene_id(
+        ImageryLayer.VIIRS_NOAA20_TRUE_COLOR, SCENE_DAY, "x1y2"
+    )
+
+
+def test_scene_normalizes_retrieval_time_to_utc() -> None:
+    assert scene().retrieved_at == datetime(2026, 3, 5, 17, tzinfo=UTC)
+
+
+def sentinel_scene(**changes: object) -> SatelliteScene:
+    layer = ImageryLayer.SENTINEL2_SWIR
+    values: dict[str, object] = {
+        "scene_id": scene_id(layer, SCENE_DAY, "x228y2"),
+        "provider": "planetary-computer",
+        "layer": layer,
+        "instrument": "MSI",
+        "platform": "Sentinel-2B",
+        "media_type": "image/webp",
+        "storage_key": f"{layer}/2026-03-05/x228y2-abababababababab.webp",
+        "acquired_at": datetime(2026, 3, 5, 10, 13, tzinfo=timezone(timedelta(hours=8))),
+        "cloud_cover": 12.5,
+        "granules": ["S2B_MSIL2A_20260305T021349_R060_T49NGA_20260305T050145"],
+        **changes,
+    }
+    return scene(**values)
+
+
+def test_sentinel_scenes_carry_their_pass_time_and_granules() -> None:
+    sentinel = sentinel_scene()
+    assert sentinel.acquired_at == datetime(2026, 3, 5, 2, 13, tzinfo=UTC)
+    assert sentinel.layer.provider is ImageryProvider.PLANETARY_COMPUTER
+    assert sentinel.layer.instrument is Instrument.MSI
+    # Optional fields keep older (GIBS) scenes valid.
+    assert (scene().acquired_at, scene().cloud_cover, scene().granules) == (None, None, [])
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"provider": "nasa-gibs"},
+        {"instrument": "VIIRS"},
+        {"acquired_at": datetime(2026, 3, 4, 23, tzinfo=UTC)},
+        {"cloud_cover": 101},
+    ],
+)
+def test_sentinel_scene_rejects_inconsistent_events(changes: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        _ = sentinel_scene(**changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"west": 114.5, "east": 114.0},
+        {"south": 1.5},
+        {"instrument": "MODIS"},
+        {"tile": "x228y3"},  # scene_id no longer matches
+        {"tile": "228_2"},
+        {"storage_key": "../outside.jpg"},
+        {"storage_key": "/etc/passwd"},
+        {"storage_key": "a/./b.jpg"},
+        {"sha256": "XYZ"},
+        {"media_type": "image/png"},
+    ],
+)
+def test_scene_rejects_inconsistent_events(changes: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        _ = scene(**changes)

@@ -67,15 +67,19 @@ describe("incident details", () => {
   it("shows the lifecycle, growth chart, and weather context", () => {
     render(<IncidentDetails summary={incidentSummary()} incident={incidentDetail()} loading={false} error="" />);
     expect(screen.getByText("Growing (was new)")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View Full Report" })).toHaveAttribute(
+      "href",
+      `#/incidents/${incidentSummary().incident_id}`,
+    );
     expect(screen.getByText("31 km² (6 cells)")).toBeInTheDocument();
-    expect(screen.getByText("85.5 MW")).toBeInTheDocument();
+    expect(screen.getByText("85.5 MW", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("VIIRS_NOAA20_NRT, MODIS_NRT")).toBeInTheDocument();
 
     const chart = screen.getByRole("img", { name: /Growth over time: 3 days from 2026-03-03 to 2026-03-05/ });
     expect(chart).toHaveAccessibleName(/up to 30 detections a day; footprint 31 km² at the end/);
     expect(chart.querySelectorAll("rect")).toHaveLength(3);
     const table = within(screen.getByRole("table", { name: "" }));
-    expect(table.getByRole("rowheader", { name: "2026-03-04" }).closest("tr")).toHaveTextContent("2026-03-04303");
+    expect(table.getByRole("rowheader", { name: "2026-03-04" }).closest("tr")).toHaveTextContent("2026-03-0430385.5 MW26 km²");
 
     expect(screen.getByText("Now (2026-03-05 07:00 UTC)")).toBeInTheDocument();
     expect(screen.getAllByText("14 km/h from NE").length).toBeGreaterThan(0);

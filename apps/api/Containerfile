@@ -19,6 +19,7 @@ RUN apk add --no-cache libstdc++ \
     && addgroup -S app && adduser -S -G app app
 COPY --from=build /opt/venv /opt/venv
 COPY apps/api/healthcheck.py /app/healthcheck.py
+ENV IMAGERY_DIR=/data/imagery
 WORKDIR /app
 USER app
 EXPOSE 8000

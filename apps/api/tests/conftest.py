@@ -74,6 +74,20 @@ TABLES: dict[str, LiteralString] = {
             PRIMARY KEY (country, hour_start)
         )
     """,
+    "satellite_scenes": """
+        CREATE TABLE satellite_scenes (
+            scene_id uuid PRIMARY KEY, provider text NOT NULL, layer text NOT NULL,
+            instrument text NOT NULL, platform text NOT NULL, acquisition_date date NOT NULL,
+            tile text NOT NULL, west double precision NOT NULL, south double precision NOT NULL,
+            east double precision NOT NULL, north double precision NOT NULL,
+            footprint geometry(Polygon, 4326) NOT NULL, width integer NOT NULL,
+            height integer NOT NULL, media_type text NOT NULL, byte_size integer NOT NULL,
+            sha256 text NOT NULL, storage_key text NOT NULL, source_url text NOT NULL,
+            retrieved_at timestamptz NOT NULL, stored_at timestamptz NOT NULL DEFAULT now(),
+            acquired_at timestamptz, cloud_cover double precision,
+            granules text[] NOT NULL DEFAULT '{}'
+        )
+    """,
 }
 
 

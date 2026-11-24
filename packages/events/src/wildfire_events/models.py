@@ -19,10 +19,15 @@ from wildfire_events.countries import CountryLiteral
 
 
 class Instrument(StrEnum):
-    """Satellite sensor family; values are the names FIRMS uses."""
+    """Satellite sensor family; values are the names FIRMS uses.
+
+    FIRMS detections come from VIIRS and MODIS. MSI (the Sentinel-2 MultiSpectral
+    Instrument) only provides imagery.
+    """
 
     VIIRS = "VIIRS"
     MODIS = "MODIS"
+    MSI = "MSI"
 
 
 class FirmsProduct(StrEnum):
@@ -34,7 +39,7 @@ class FirmsProduct(StrEnum):
     MODIS_NRT = "MODIS_NRT"
 
     @property
-    def instrument(self) -> Instrument:
+    def instrument(self) -> "FirmsInstrumentLiteral":
         match self:
             case (
                 FirmsProduct.VIIRS_SNPP_NRT
@@ -48,6 +53,61 @@ class FirmsProduct(StrEnum):
 
 class WeatherProvider(StrEnum):
     OPEN_METEO = "open-meteo"
+
+
+class ImageryProvider(StrEnum):
+    NASA_GIBS = "nasa-gibs"
+    PLANETARY_COMPUTER = "planetary-computer"
+
+
+class ImageryLayer(StrEnum):
+    """Imagery layers of fire incidents.
+
+    The VIIRS layers are daily NASA GIBS corrected-reflectance composites (values are
+    the GIBS layer identifiers) at 250-750 m: true color shows smoke and clouds as the
+    eye would; the false-color composite (bands M11, I2, I1) shows active burning in
+    orange-red and burn scars in brown, and sees through thin smoke.
+
+    The Sentinel-2 layer is a 20 m short-wave infrared composite (bands B12, B8A,
+    B04) of individual Sentinel-2 L2A passes, every 2-5 days: active flames show
+    bright red to yellow, fresh burn scars dark red-brown, vegetation green, and
+    it sees through smoke (not cloud). It is the layer for confirming a fire.
+    """
+
+    VIIRS_NOAA20_TRUE_COLOR = "VIIRS_NOAA20_CorrectedReflectance_TrueColor"
+    VIIRS_NOAA20_FALSE_COLOR = "VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1"
+    SENTINEL2_SWIR = "Sentinel-2_L2A_SWIR_B12-B8A-B04"
+
+    @property
+    def provider(self) -> ImageryProvider:
+        match self:
+            case ImageryLayer.VIIRS_NOAA20_TRUE_COLOR | ImageryLayer.VIIRS_NOAA20_FALSE_COLOR:
+                return ImageryProvider.NASA_GIBS
+            case ImageryLayer.SENTINEL2_SWIR:
+                return ImageryProvider.PLANETARY_COMPUTER
+
+    @property
+    def instrument(self) -> Instrument:
+        match self.provider:
+            case ImageryProvider.NASA_GIBS:
+                return Instrument.VIIRS
+            case ImageryProvider.PLANETARY_COMPUTER:
+                return Instrument.MSI
+
+    @property
+    def platform(self) -> str:
+        """The satellite, or for Sentinel-2 the constellation (scenes name the satellite)."""
+        match self.provider:
+            case ImageryProvider.NASA_GIBS:
+                return "NOAA-20"
+            case ImageryProvider.PLANETARY_COMPUTER:
+                return "Sentinel-2"
+
+
+# Sentinel-2 passes up to this many days before an incident's first and after its last
+# day of activity are acquired and shown: the earlier ones as a baseline, the later
+# ones for the burn scar when no pass caught the fire burning.
+SENTINEL_CONTEXT_DAYS = 6
 
 
 class IncidentStatus(StrEnum):
@@ -79,7 +139,8 @@ class RiskLevel(StrEnum):
 # Literal of the members renders inline, exactly like the original string Literals.
 # Validated values are still enum members, and type checkers treat each Literal as
 # its enum. ``test_wire_literals_cover_their_enums`` keeps them complete.
-InstrumentLiteral = Literal[Instrument.VIIRS, Instrument.MODIS]
+FirmsInstrumentLiteral = Literal[Instrument.VIIRS, Instrument.MODIS]
+InstrumentLiteral = Literal[Instrument.VIIRS, Instrument.MODIS, Instrument.MSI]
 FirmsProductLiteral = Literal[
     FirmsProduct.VIIRS_SNPP_NRT,
     FirmsProduct.VIIRS_NOAA20_NRT,
@@ -88,6 +149,12 @@ FirmsProductLiteral = Literal[
 ]
 WeatherProviderLiteral = Literal[WeatherProvider.OPEN_METEO]
 RiskLevelLiteral = Literal[RiskLevel.LOW, RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.EXTREME]
+ImageryProviderLiteral = Literal[ImageryProvider.NASA_GIBS, ImageryProvider.PLANETARY_COMPUTER]
+ImageryLayerLiteral = Literal[
+    ImageryLayer.VIIRS_NOAA20_TRUE_COLOR,
+    ImageryLayer.VIIRS_NOAA20_FALSE_COLOR,
+    ImageryLayer.SENTINEL2_SWIR,
+]
 IncidentStatusLiteral = Literal[
     IncidentStatus.NEW,
     IncidentStatus.GROWING,
@@ -135,6 +202,15 @@ def detection_event_id(
     return uuid.uuid5(_EVENT_NAMESPACE, key)
 
 
+def scene_id(layer: ImageryLayer, acquisition_date: date, tile: str) -> uuid.UUID:
+    """Deterministic identity of one image tile of a layer on one day.
+
+    Neighbouring incidents that need the same tile share the scene, and the imagery
+    producer recognises scenes it already acquired.
+    """
+    return uuid.uuid5(_EVENT_NAMESPACE, f"scene|{layer}|{acquisition_date.isoformat()}|{tile}")
+
+
 class FirmsDetection(BaseModel):
     """One satellite active-fire pixel from a NASA FIRMS NRT product."""
 
@@ -144,7 +220,7 @@ class FirmsDetection(BaseModel):
 
     event_id: uuid.UUID
     product: FirmsProductLiteral
-    instrument: InstrumentLiteral
+    instrument: FirmsInstrumentLiteral
     satellite: str = Field(min_length=1, max_length=32)
     observed_at: AwareDatetime
     latitude: float = Field(ge=-90, le=90)
@@ -402,3 +478,85 @@ class HourlyDetectionStats(BaseModel):
     @property
     def key(self) -> str:
         return f"{self.country}|{self.hour_start.isoformat()}"
+
+
+# Relative, slash-separated path whose segments do not start with a dot, so it can
+# be neither absolute nor contain "." or ".." segments.
+STORAGE_KEY_PATTERN = r"^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"
+
+
+class SatelliteScene(BaseModel):
+    """One satellite image tile in the imagery store, with its time and geography.
+
+    The event is a claim check: the image itself is written to the imagery store
+    under ``storage_key`` before the event is published, and is never changed (keys
+    contain the content hash). Keyed by ``scene_id``; a later acquisition of the
+    same scene replaces the earlier one in the compacted topic.
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid", allow_inf_nan=False, title="SatelliteScene"
+    )
+
+    scene_id: uuid.UUID = Field(description="Also the Kafka message key; see scene_id()")
+    provider: ImageryProviderLiteral
+    layer: ImageryLayerLiteral
+    instrument: InstrumentLiteral
+    platform: str = Field(min_length=1, max_length=32)
+    acquisition_date: date = Field(
+        description=(
+            "UTC day of the daily composite (overpasses within it are not distinguished),"
+            " or of the pass (see acquired_at)"
+        )
+    )
+    tile: str = Field(
+        pattern=r"^x-?\d+y-?\d+$",
+        description="Grid tile 'x<column>y<row>' of the imagery producer's tile grid",
+    )
+    west: float = Field(ge=-180, le=180)
+    south: float = Field(ge=-90, le=90)
+    east: float = Field(ge=-180, le=180)
+    north: float = Field(ge=-90, le=90)
+    width: int = Field(ge=1, description="Image width in pixels")
+    height: int = Field(ge=1, description="Image height in pixels")
+    media_type: Literal["image/jpeg", "image/webp"]
+    byte_size: int = Field(ge=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    storage_key: str = Field(
+        pattern=STORAGE_KEY_PATTERN, description="Path of the image in the imagery store"
+    )
+    source_url: str = Field(min_length=1, description="Request that returned the image")
+    retrieved_at: AwareDatetime
+    acquired_at: AwareDatetime | None = Field(
+        default=None, description="Sensing time of a single pass; None for daily composites"
+    )
+    cloud_cover: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Cloud cover of the source granules in percent (not of this tile alone)",
+    )
+    granules: list[str] = Field(
+        default_factory=list,
+        max_length=16,
+        description="Provider IDs of the source granules composited into the image",
+    )
+
+    @field_validator("retrieved_at", "acquired_at")
+    @classmethod
+    def _normalize_time(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else _utc(value)
+
+    @model_validator(mode="after")
+    def consistent(self) -> "SatelliteScene":
+        if self.west >= self.east or self.south >= self.north:
+            raise ValueError("bounds must have west < east and south < north")
+        if self.layer.instrument is not self.instrument:
+            raise ValueError(f"{self.layer} is not a {self.instrument} layer")
+        if self.layer.provider is not self.provider:
+            raise ValueError(f"{self.layer} is not a {self.provider} layer")
+        if self.acquired_at is not None and self.acquired_at.date() != self.acquisition_date:
+            raise ValueError("acquired_at is not on the acquisition date (UTC)")
+        if scene_id(self.layer, self.acquisition_date, self.tile) != self.scene_id:
+            raise ValueError("scene_id does not match the layer, date, and tile")
+        return self

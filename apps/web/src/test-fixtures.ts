@@ -1,4 +1,5 @@
 import type { Hotspot } from "./hotspots";
+import type { ImageryLayer, SatelliteScene } from "./imagery";
 import type { IncidentDay, IncidentDetail, IncidentSummary, IncidentWeatherHour } from "./incidents";
 
 /** Test data shaped like the API responses (docs: Phase 8 contracts). */
@@ -75,4 +76,42 @@ export function enrichedHotspot(changes: Partial<Hotspot> = {}): Hotspot {
     },
     ...changes,
   };
+}
+
+export const TRUE_COLOR: ImageryLayer = "VIIRS_NOAA20_CorrectedReflectance_TrueColor";
+export const FALSE_COLOR: ImageryLayer = "VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1";
+
+export function satelliteScene(changes: Partial<SatelliteScene> = {}): SatelliteScene {
+  return {
+    scene_id: "5d2c1e0a-0000-5000-8000-000000000001",
+    provider: "nasa-gibs",
+    layer: TRUE_COLOR,
+    instrument: "VIIRS",
+    platform: "NOAA-20",
+    acquisition_date: "2026-03-05",
+    retrieved_at: "2026-03-05T13:02:00Z",
+    bbox: [114, 0.5, 114.5, 1],
+    width: 512,
+    height: 512,
+    acquired_at: null,
+    cloud_cover: null,
+    ...changes,
+  };
+}
+
+export const SWIR: ImageryLayer = "Sentinel-2_L2A_SWIR_B12-B8A-B04";
+
+export function sentinelScene(changes: Partial<SatelliteScene> = {}): SatelliteScene {
+  const day = changes.acquisition_date ?? "2026-03-05";
+  return satelliteScene({
+    provider: "planetary-computer",
+    layer: SWIR,
+    instrument: "MSI",
+    platform: "Sentinel-2B",
+    acquired_at: `${day}T02:13:49Z`,
+    cloud_cover: 12.5,
+    width: 2048,
+    height: 2048,
+    ...changes,
+  });
 }

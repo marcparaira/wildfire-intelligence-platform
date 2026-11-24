@@ -2,7 +2,7 @@ import { useId } from "react";
 import { formatNumber, formatRisk, formatWind, riskLevels } from "./conditions";
 import type { RiskSummary } from "./conditions";
 import { formatUtc } from "./hotspots";
-import { growthChart, incidentStatuses, weatherOutlook } from "./incidents";
+import { formatArea, growthChart, INCIDENT_METHOD_NOTE, incidentFields, incidentReportHref, incidentStatuses, weatherOutlook } from "./incidents";
 import type { IncidentDay, IncidentDetail, IncidentStatus, IncidentSummary, IncidentWeather } from "./incidents";
 
 export function StatusBadge({ status }: { status: IncidentStatus }) {
@@ -24,9 +24,6 @@ export function RiskBadge({ risk }: { risk: RiskSummary | null }) {
   );
 }
 
-function formatArea(km2: number): string {
-  return `${km2 < 10 ? km2.toFixed(1) : Math.round(km2).toLocaleString("en-US")} km²`;
-}
 
 interface IncidentPanelProps {
   items: IncidentSummary[];
@@ -94,10 +91,18 @@ export function IncidentPanel({
 const CHART_WIDTH = 262;
 const CHART_HEIGHT = 96;
 
-export function GrowthChart({ daily }: { daily: IncidentDay[] }) {
+interface GrowthChartProps {
+  daily: IncidentDay[];
+  width?: number;
+  height?: number;
+  /** Show the daily data table expanded. */
+  dataOpen?: boolean;
+}
+
+export function GrowthChart({ daily, width = CHART_WIDTH, height = CHART_HEIGHT, dataOpen = false }: GrowthChartProps) {
   const titleId = useId();
   if (daily.length === 0) return <p className="detail-note">No daily activity recorded.</p>;
-  const chart = growthChart(daily, CHART_WIDTH, CHART_HEIGHT);
+  const chart = growthChart(daily, width, height);
   const first = daily[0];
   const last = daily[daily.length - 1];
   const summary =
@@ -106,27 +111,27 @@ export function GrowthChart({ daily }: { daily: IncidentDay[] }) {
     `footprint ${formatArea(last.footprint_km2)} at the end.`;
   return (
     <figure className="growth-chart">
-      <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT + 14}`} role="img" aria-labelledby={titleId}>
+      <svg viewBox={`0 0 ${width} ${height + 14}`} role="img" aria-labelledby={titleId}>
         <title id={titleId}>{`Growth over time: ${summary}`}</title>
-        <line className="chart-axis" x1={0} y1={CHART_HEIGHT} x2={CHART_WIDTH} y2={CHART_HEIGHT} />
+        <line className="chart-axis" x1={0} y1={height} x2={width} y2={height} />
         {chart.bars.map((bar) => (
           <rect key={bar.day} className="chart-bar" x={bar.x} y={bar.y} width={bar.width} height={bar.height}>
             <title>{`${bar.day}: ${bar.detections} detections`}</title>
           </rect>
         ))}
         <polyline className="chart-line" points={chart.footprintLine} />
-        <text className="chart-label" x={0} y={CHART_HEIGHT + 12}>{first.day.slice(5)}</text>
-        {daily.length > 1 && <text className="chart-label" x={CHART_WIDTH} y={CHART_HEIGHT + 12} textAnchor="end">{last.day.slice(5)}</text>}
+        <text className="chart-label" x={0} y={height + 12}>{first.day.slice(5)}</text>
+        {daily.length > 1 && <text className="chart-label" x={width} y={height + 12} textAnchor="end">{last.day.slice(5)}</text>}
       </svg>
       <figcaption>
         <span><i className="chart-key-bar" aria-hidden="true" />Detections per day (max {chart.maxDetections.toLocaleString("en-US")})</span>
         <span><i className="chart-key-line" aria-hidden="true" />Cumulative footprint (max {formatArea(chart.maxFootprintKm2)})</span>
       </figcaption>
-      <details className="chart-data">
+      <details className="chart-data" open={dataOpen}>
         <summary>Daily data</summary>
         <table>
           <thead>
-            <tr><th scope="col">Day (UTC)</th><th scope="col">Detections</th><th scope="col">New cells</th><th scope="col">Footprint</th></tr>
+            <tr><th scope="col">Day (UTC)</th><th scope="col">Detections</th><th scope="col">New cells</th><th scope="col">Max FRP</th><th scope="col">Footprint</th></tr>
           </thead>
           <tbody>
             {daily.map((day) => (
@@ -134,6 +139,7 @@ export function GrowthChart({ daily }: { daily: IncidentDay[] }) {
                 <th scope="row">{day.day}</th>
                 <td>{day.detections.toLocaleString("en-US")}</td>
                 <td>{day.new_cells.toLocaleString("en-US")}</td>
+                <td>{formatNumber(day.max_frp_mw, "MW")}</td>
                 <td>{formatArea(day.footprint_km2)}</td>
               </tr>
             ))}
@@ -195,30 +201,18 @@ export function IncidentDetails({ summary, incident, loading, error }: IncidentD
     if (error) return <p className="detail-empty" role="alert">Could not load incident: {error}.</p>;
     return <p className="detail-empty">{loading ? "Loading incident…" : "Incident unavailable."}</p>;
   }
-  const status = shown.previous_status && shown.previous_status !== shown.status
-    ? `${incidentStatuses[shown.status].label} (was ${incidentStatuses[shown.previous_status].label.toLowerCase()})`
-    : incidentStatuses[shown.status].label;
-  const fields: [string, string][] = [
-    ["Status", status],
-    ["First observed", formatUtc(shown.first_observed_at)],
-    ["Last observed", formatUtc(shown.last_observed_at)],
-    ["Detections", shown.detection_count.toLocaleString("en-US")],
-    ["Footprint", `${formatArea(shown.footprint_km2)} (${shown.footprint_cells.toLocaleString("en-US")} cells)`],
-    ["Maximum FRP", formatNumber(shown.max_frp_mw, "MW")],
-    ["Total FRP", formatNumber(shown.total_frp_mw, "MW")],
-    ["Products", shown.products.join(", ") || "—"],
-    ["Peak fire risk (24 h)", shown.peak_risk ? formatRisk(shown.peak_risk) : "Unknown"],
-  ];
+  const fields = incidentFields(shown);
   return (
     <div className="detail-content incident-detail">
       <div className="detail-type">Fire incident <StatusBadge status={shown.status} /></div>
+      <a className="report-button" href={incidentReportHref(shown.incident_id)}>View Full Report</a>
       <dl>{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
       {shown.merged_into && <p>Merged into incident {shown.merged_into.slice(0, 8)}.</p>}
       <h3>Growth over time</h3>
       {incident ? <GrowthChart daily={incident.daily} /> : <p className="detail-note" role={error ? "alert" : "status"}>{error ? `Could not load history: ${error}.` : "Loading history…"}</p>}
       <h3>Weather context</h3>
       {incident ? <WeatherContext weather={incident.weather} /> : <p className="detail-note">{error ? "Weather unavailable." : "Loading weather…"}</p>}
-      <p>Detections clustered by space and time; the footprint counts ~5 km² grid cells with detections, not a mapped fire perimeter. Peak risk is the highest risk among the incident's detections in its last 24 hours of activity.</p>
+      <p>{INCIDENT_METHOD_NOTE}</p>
     </div>
   );
 }

@@ -23,14 +23,16 @@ flowchart LR
 
     %% External Sources (Planned)
     OPENAQ["OpenAQ API<br/>(Air quality)"]
-    HIMAWARI["Himawari-8<br/>(Satellite imagery)"]
+    GIBS["NASA GIBS<br/>(Satellite imagery)"]
+    PC["Microsoft Planetary Computer<br/>(Sentinel-2 imagery)"]
+    HIMAWARI["Himawari-9<br/>(Geostationary detections)"]
 
     %% Ingestor Service
     ING["Ingestor Service"]
 
     %% Apache Kafka (Compact)
     subgraph KAFKA["Apache Kafka + Schema Registry"]
-        T_SRC["Source Topics<br/>(firms.detections,<br/>weather.forecasts)"]
+        T_SRC["Source Topics<br/>(firms.detections,<br/>weather.forecasts,<br/>imagery.scenes)"]
         T_DER["Derived Topics<br/>(detections.enriched,<br/>fire.incidents,<br/>stats.hourly)"]
         T_USER["User Topics"]
         T_DLQ["Dead-Letter Topics"]
@@ -63,6 +65,8 @@ flowchart LR
     %% Main flows: Sources to Ingestor
     FIRMS --> ING
     METEO --> ING
+    GIBS --> ING
+    PC --> ING
     OPENAQ -.-> ING
     HIMAWARI -.-> ING
 
@@ -117,7 +121,7 @@ flowchart LR
     classDef streaming fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#92400e
     classDef storage fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
 
-    class FIRMS,METEO external
+    class FIRMS,METEO,GIBS,PC external
     class ING done
     class T_SRC,T_DER,T_DLQ streaming
     class DB storage
@@ -148,7 +152,7 @@ schemas, dead letters, and replaying the log.
 apps/api/              FastAPI: PostGIS queries and the live SSE stream
 apps/web/              React + TypeScript + OpenLayers dashboard
 packages/events/       Shared topics, H3 keys, event models, schemas, and codec
-services/ingestor/     Scheduled FIRMS and Open-Meteo producers
+services/ingestor/     Scheduled FIRMS, Open-Meteo, NASA GIBS, and Sentinel-2 imagery producers
 services/sink-worker/  Kafka-to-PostGIS projections and dead-letter routing
 services/stream-processor/  Quix Streams jobs: incidents, enrichment and risk, hourly statistics
 infra/compose/         Local PostgreSQL/PostGIS initialization
@@ -197,6 +201,18 @@ when `compose.yaml` changes: run `podman compose down` (without `-v`), then
   - Weather context from the latest forecast
   
   Filter incidents by status using the **Incident Status** buttons in the left sidebar (new, growing, stable).
+
+- **Incident reports:** **View Full Report** in the incident details opens a
+  page for the incident (`#/incidents/<id>`). It shows the key figures, the
+  daily evolution with its data table, the weather context, and the satellite
+  imagery, drawn on a map with the incident's bounding box and that day's
+  detections. To confirm a fire, the default layer is Sentinel-2 short-wave
+  infrared (20 m; flames bright red to yellow, fresh burn scars dark red-brown)
+  from the passes during, before, and after the incident's activity, with the
+  pass time, cloud cover, and a colour key. NASA GIBS VIIRS true- and
+  false-color daily composites (250-750 m) cover each day of activity. You can
+  choose the layer, the date (days with detections are marked), and the
+  imagery opacity.
 
 - **Hotspots** from NASA FIRMS (VIIRS SNPP, NOAA-20, NOAA-21, and MODIS) appear only when you select an incident. Each hotspot shows:
   - Radiative power (FRP) on a log scale
@@ -247,6 +263,11 @@ dropped. Forecasts are fetched every 3 hours.
 | `FIRMS_DAYS` | `2` | Days per request (1–5) |
 | `FIRMS_INTERVAL_MINUTES` | `30` | FIRMS polling interval |
 | `WEATHER_INTERVAL_MINUTES` | `180` | Forecast polling interval |
+| `IMAGERY_LAYERS` | Sentinel-2 SWIR, VIIRS true and false color | Comma-separated imagery layers; empty disables imagery |
+| `IMAGERY_INTERVAL_MINUTES` | `60` | Imagery acquisition interval |
+| `IMAGERY_DAYS` | `5` | Days of incident activity to fetch imagery for, counted back from the newest activity (1–10) |
+| `IMAGERY_MAX_SCENES_PER_RUN` | `120` | GIBS images fetched per run; the rest wait for the next run |
+| `SENTINEL_MAX_SCENES_PER_RUN` | `40` | Sentinel-2 scenes rendered per run (5-10 s each per granule) |
 
 Detections have deterministic event IDs, so overlapping polls are never
 published twice. The same fire seen by two satellites within 1 km and

@@ -371,6 +371,75 @@ fieldset legend { padding: 0 8px; margin: -17px 0 0 -8px; font-size: 12px; font-
 }
 .status-button:hover { opacity: 0.8; }
 
+.report-button {
+  display: block;
+  margin: 8px 0 10px;
+  padding: 7px 10px;
+  color: #fff;
+  font-weight: 650;
+  text-align: center;
+  text-decoration: none;
+  border: 1px solid #1d4f74;
+  border-radius: 2px;
+  background: #255f88;
+}
+.report-button:hover { background: #1d4f74; }
+.report-button:focus-visible, .report a:focus-visible, .report button:focus-visible { outline: 2px solid #156099; outline-offset: 2px; }
+
+.report { max-width: 1040px; margin: 0 auto; padding: 12px 20px 32px; }
+.report-nav a { color: #255f88; font-weight: 600; text-decoration: none; }
+.report-nav a:hover { text-decoration: underline; }
+.report-header { padding: 10px 0 12px; border-bottom: 1px solid #d7ddda; }
+.report-header h2 { margin: 0 0 6px; font-size: 18px; font-weight: 650; }
+.report-header code { font-size: 16px; }
+.report-header p { margin: 6px 0 0; color: #52605a; line-height: 1.45; }
+.report-badges { display: flex; gap: 14px; }
+.report-section { padding: 14px 0; border-bottom: 1px solid #e3e7e5; }
+.report-section h3 { margin: 0 0 10px; font-size: 14px; font-weight: 650; }
+.report-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px 16px; margin: 0; }
+.report-fields div { display: flex; flex-direction: column; gap: 2px; }
+.report-fields dt { color: #596761; font-size: 12px; }
+.report-fields dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.report .growth-chart { max-width: 680px; }
+.report .weather-context { max-width: 520px; }
+.report .weather-context dl { display: grid; grid-template-columns: repeat(3, minmax(0, auto)); gap: 8px 24px; margin: 0 0 10px; }
+.report .weather-context dl div { display: flex; flex-direction: column; gap: 2px; }
+.report .weather-context dt { color: #596761; font-size: 12px; }
+.report .weather-context dd { margin: 0; font-weight: 600; }
+.report-footer p { margin: 10px 0 0; color: #596761; font-size: 12px; line-height: 1.45; }
+
+.imagery-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 10px; }
+.segmented, .imagery-days { display: flex; flex-wrap: wrap; gap: 4px; }
+.segmented button, .imagery-days button {
+  min-height: 30px;
+  padding: 4px 10px;
+  color: #26322c;
+  border: 1px solid #aebbb4;
+  border-radius: 2px;
+  background: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.segmented button:hover, .imagery-days button:hover { background: #e0e8e2; }
+.segmented button[aria-checked="true"], .imagery-days button[aria-checked="true"] {
+  color: #fff;
+  border-color: #1d4f74;
+  background: #255f88;
+}
+.imagery-days button.day-active { box-shadow: inset 0 -3px 0 #e0701c; }
+.imagery-days button.day-active[aria-checked="true"] { box-shadow: inset 0 -3px 0 #ffb070; }
+.timing-active { color: #a8470b; font-weight: 600; }
+.swir-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 0; padding: 0; list-style: none; }
+.swir-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.swir-legend i { width: 14px; height: 14px; border: 1px solid #6b746f; }
+.imagery-figure { margin: 0; }
+.imagery-map { width: 100%; height: 520px; border: 1px solid #c8d0cd; background: #dfe5e2; }
+.imagery-map .ol-attribution { font-size: 11px; }
+.imagery-figure figcaption { margin-top: 6px; line-height: 1.45; }
+.imagery-figure figcaption .detail-note { display: block; }
+.imagery-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; margin-top: 8px; }
+.imagery-options .layer-toggle { padding: 0; }
+.opacity-control { display: inline-flex; align-items: center; gap: 8px; }
+
 @media (max-width: 1050px) {
   .header-source { display: none; }
   .topnav { margin-left: auto; }
@@ -397,4 +466,6 @@ fieldset legend { padding: 0 8px; margin: -17px 0 0 -8px; font-size: 12px; font-
   .weather-timeline input { flex-basis: 100%; order: 1; }
   .content { flex: none; }
   .map-wrap { height: 60vh; min-height: 340px; flex: none; }
+  .report { padding: 10px 12px 24px; }
+  .imagery-map { height: 60vh; min-height: 320px; }
 }

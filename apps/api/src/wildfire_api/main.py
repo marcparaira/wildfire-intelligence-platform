@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 
 from wildfire_api.hotspots import router as hotspots_router
+from wildfire_api.imagery import router as imagery_router
 from wildfire_api.incidents import router as incidents_router
 from wildfire_api.live import router as live_router
 from wildfire_api.pipeline.routes import router as pipeline_router
@@ -23,3 +24,4 @@ app.include_router(live_router)
 app.include_router(pipeline_router)
 app.include_router(incidents_router)
 app.include_router(stats_router)
+app.include_router(imagery_router)

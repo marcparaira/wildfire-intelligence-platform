@@ -1,14 +1,16 @@
 """Reading recent state back from Kafka topics.
 
 The ingestor keeps no local state: on startup it learns what it already published
-by reading the tail of its own topics.
+by reading the tail of its own topics, and the imagery producer reads the current
+incidents from ``fire.incidents``.
 """
 
 import time
 from datetime import UTC, datetime
-from typing import Final
+from typing import Final, cast
 
 from kafka import KafkaConsumer
+from kafka.consumer.fetcher import ConsumerRecord
 from kafka.structs import TopicPartition
 
 from wildfire_ingestor.publisher import EVENT_ID_HEADER, PublishedEvents
@@ -18,6 +20,11 @@ POLL_TIMEOUT_MS = 1000
 LOAD_MAX_RECORDS = 5000
 LATEST_DEADLINE_SECONDS = 30
 LOAD_DEADLINE_SECONDS = 300
+# kafka-python 2.3 fetches up to 50 MB per request but by default rejects network frames
+# over 1 MB, so reading a topic's backlog fails and reconnects. The frame limit must
+# cover the largest fetch response.
+FETCH_MAX_BYTES = 50 * 1024 * 1024
+RECEIVE_MAX_BYTES = FETCH_MAX_BYTES + 1024 * 1024
 
 
 def _behind(consumer: KafkaConsumer, partition: TopicPartition, end: int) -> bool:
@@ -34,6 +41,8 @@ def _assigned_consumer(
         group_id=None,
         enable_auto_commit=False,
         client_id=CLIENT_ID,
+        fetch_max_bytes=FETCH_MAX_BYTES,
+        receive_message_max_bytes=RECEIVE_MAX_BYTES,  # pyright: ignore[reportCallIssue] -- missing from the typeshed stubs
     )
     partitions = consumer.partitions_for_topic(topic) or set()
     assignment = [TopicPartition(topic, partition) for partition in sorted(partitions)]
@@ -109,3 +118,44 @@ def _seek_to_time(
         if start is not None and start.offset < end[tp]:
             pending.add(tp)
     return pending
+
+
+def latest_values(
+    bootstrap_servers: str, topic: str, since: datetime | None = None
+) -> dict[bytes, bytes | None]:
+    """The newest value per key among records published since ``since`` (default: all).
+
+    Meant for compacted topics, read like a table; a tombstone yields ``None``.
+    Records without a key are ignored. Raises ``TimeoutError`` if the topic cannot
+    be read to its current end in time.
+    """
+    consumer, assignment = _assigned_consumer(bootstrap_servers, topic)
+    values: dict[bytes, bytes | None] = {}
+    try:
+        if not assignment:
+            return values
+        end = consumer.end_offsets(assignment)
+        if since is None:
+            consumer.seek_to_beginning(*assignment)
+            pending = {tp for tp in assignment if _behind(consumer, tp, end[tp])}
+        else:
+            pending = _seek_to_time(consumer, end, since)
+        deadline = time.monotonic() + LOAD_DEADLINE_SECONDS
+        while pending and time.monotonic() < deadline:
+            polled = consumer.poll(timeout_ms=POLL_TIMEOUT_MS, max_records=LOAD_MAX_RECORDS)
+            for records in polled.values():
+                for record in records:
+                    _keep_latest(values, record)
+            pending = {tp for tp in pending if _behind(consumer, tp, end[tp])}
+        if pending:
+            raise TimeoutError(f"timed out reading {topic}")
+    finally:
+        consumer.close()
+    return values
+
+
+def _keep_latest(values: dict[bytes, bytes | None], record: ConsumerRecord) -> None:
+    # A key always maps to one partition, so records of a key arrive in offset order.
+    key = cast(bytes | None, record.key)
+    if key is not None:
+        values[key] = cast(bytes | None, record.value)

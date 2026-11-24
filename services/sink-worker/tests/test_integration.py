@@ -9,7 +9,7 @@ import os
 import time
 import uuid
 from collections.abc import Iterator, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from http.client import HTTPResponse
 from threading import Event, Thread
 from typing import cast
@@ -35,17 +35,22 @@ from wildfire_events.models import (
     FirmsProduct,
     HourlyDetectionStats,
     HourlyWeather,
+    ImageryLayer,
+    ImageryProvider,
     IncidentDay,
     IncidentStatus,
     ObservedWeather,
     RiskLevel,
+    SatelliteScene,
     WeatherForecast,
     WeatherProvider,
     detection_event_id,
+    scene_id,
 )
 from wildfire_events.registry import SchemaRegistry
 from wildfire_sink.detections import DetectionProjection
 from wildfire_sink.enrichment import EnrichmentProjection
+from wildfire_sink.imagery import SceneProjection
 from wildfire_sink.incidents import IncidentProjection
 from wildfire_sink.runner import (
     DeadLetters,
@@ -331,6 +336,86 @@ def test_hourly_statistics_upsert_and_tombstones(schema_url: str) -> None:
     project(schema_url, projection, [(record(key=stats(3, 2).key.encode()), None)])
     with psycopg.connect(schema_url) as connection:
         assert connection.execute("SELECT count(*) FROM detection_stats_hourly").fetchone() == (0,)
+
+
+def satellite_scene(retrieved_at: datetime, sha256: str) -> SatelliteScene:
+    layer = ImageryLayer.VIIRS_NOAA20_TRUE_COLOR
+    day = date(2026, 3, 5)
+    return SatelliteScene(
+        scene_id=scene_id(layer, day, "x228y2"),
+        provider=ImageryProvider.NASA_GIBS,
+        layer=layer,
+        instrument=layer.instrument,
+        platform=layer.platform,
+        acquisition_date=day,
+        tile="x228y2",
+        west=114.0,
+        south=1.0,
+        east=114.5,
+        north=1.5,
+        width=512,
+        height=512,
+        media_type="image/jpeg",
+        byte_size=1234,
+        sha256=sha256 * 64,
+        storage_key=f"{layer}/2026-03-05/x228y2-{sha256 * 16}.jpg",
+        source_url="https://gibs.example/wms",
+        retrieved_at=retrieved_at,
+    )
+
+
+@needs_database
+def test_scenes_keep_the_latest_acquisition_with_a_footprint(schema_url: str) -> None:
+    projection = SceneProjection(SchemaRegistry("http://unused"))
+    newer = satellite_scene(T0 + timedelta(hours=1), "b")
+    project(schema_url, projection, [(record(), newer), (record(), satellite_scene(T0, "a"))])
+    with psycopg.connect(schema_url) as connection:
+        row = connection.execute(
+            "SELECT layer, acquisition_date, sha256, ST_AsText(footprint), ST_SRID(footprint) "
+            + "FROM satellite_scenes"
+        ).fetchone()
+    assert row == (
+        "VIIRS_NOAA20_CorrectedReflectance_TrueColor",
+        date(2026, 3, 5),
+        "b" * 64,
+        "POLYGON((114 1,114 1.5,114.5 1.5,114.5 1,114 1))",
+        4326,
+    )
+
+    project(schema_url, projection, [(record(key=str(newer.scene_id).encode()), None)])
+    with psycopg.connect(schema_url) as connection:
+        assert connection.execute("SELECT count(*) FROM satellite_scenes").fetchone() == (0,)
+
+
+@needs_database
+def test_scenes_keep_the_pass_time_cloud_cover_and_granules(schema_url: str) -> None:
+    layer = ImageryLayer.SENTINEL2_SWIR
+    day = date(2026, 3, 5)
+    sentinel = satellite_scene(T0, "c").model_copy(
+        update={
+            "scene_id": scene_id(layer, day, "x228y2"),
+            "provider": ImageryProvider.PLANETARY_COMPUTER,
+            "layer": layer,
+            "instrument": layer.instrument,
+            "platform": "Sentinel-2B",
+            "media_type": "image/webp",
+            "storage_key": f"{layer}/2026-03-05/x228y2-{'c' * 16}.webp",
+            "acquired_at": T0 - timedelta(hours=3),
+            "cloud_cover": 12.5,
+            "granules": ["S2B_A", "S2B_B"],
+        }
+    )
+    projection = SceneProjection(SchemaRegistry("http://unused"))
+    project(schema_url, projection, [(record(), satellite_scene(T0, "a")), (record(), sentinel)])
+    with psycopg.connect(schema_url) as connection:
+        rows = connection.execute(
+            "SELECT provider, acquired_at, cloud_cover, granules FROM satellite_scenes "
+            + "ORDER BY provider"
+        ).fetchall()
+    assert rows == [
+        ("nasa-gibs", None, None, []),
+        ("planetary-computer", T0 - timedelta(hours=3), 12.5, ["S2B_A", "S2B_B"]),
+    ]
 
 
 def _delete_subject(subject: str) -> None:

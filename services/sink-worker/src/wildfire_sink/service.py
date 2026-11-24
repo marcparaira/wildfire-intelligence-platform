@@ -18,6 +18,7 @@ from wildfire_events.registry import SchemaRegistry
 from wildfire_events.topics import ALL_TOPICS, SINK_WORKER_DLQ
 from wildfire_sink.detections import DetectionProjection
 from wildfire_sink.enrichment import EnrichmentProjection
+from wildfire_sink.imagery import SceneProjection
 from wildfire_sink.incidents import IncidentProjection
 from wildfire_sink.runner import (
     DeadLetters,
@@ -89,6 +90,7 @@ def main() -> None:
             worker_thread(IncidentProjection(registry), settings, dead_letters, stop),
             worker_thread(EnrichmentProjection(registry), settings, dead_letters, stop),
             worker_thread(StatisticsProjection(registry), settings, dead_letters, stop),
+            worker_thread(SceneProjection(registry), settings, dead_letters, stop),
         ]
         for worker in workers:
             worker.start()
