@@ -1,0 +1,9 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "wildfire-intelligence-platform",
+      "include-component-in-tag": false
+    }
+  }
+}
