@@ -4,7 +4,7 @@
 # Containerfiles and CI install each subproject from its own pyproject with pip.
 [project]
 name = "wildfire-intelligence-platform"
-version = "0.0.0"
+version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "wildfire-events",
