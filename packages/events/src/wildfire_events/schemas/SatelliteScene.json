@@ -13,11 +13,11 @@
         }
       ],
       "default": null,
-      "description": "Sensing time of a single pass; None for daily composites",
+      "description": "Sensing time of the pass",
       "title": "Acquired At"
     },
     "acquisition_date": {
-      "description": "UTC day of the daily composite (overpasses within it are not distinguished), or of the pass (see acquired_at)",
+      "description": "UTC day of the pass (see acquired_at)",
       "format": "date",
       "title": "Acquisition Date",
       "type": "string"
@@ -73,19 +73,12 @@
       "type": "string"
     },
     "layer": {
-      "enum": [
-        "VIIRS_NOAA20_CorrectedReflectance_TrueColor",
-        "VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1",
-        "Sentinel-2_L2A_SWIR_B12-B8A-B04"
-      ],
+      "const": "Sentinel-2_L2A_SWIR_B12-B8A-B04",
       "title": "Layer",
       "type": "string"
     },
     "media_type": {
-      "enum": [
-        "image/jpeg",
-        "image/webp"
-      ],
+      "const": "image/webp",
       "title": "Media Type",
       "type": "string"
     },
@@ -102,10 +95,7 @@
       "type": "string"
     },
     "provider": {
-      "enum": [
-        "nasa-gibs",
-        "planetary-computer"
-      ],
+      "const": "planetary-computer",
       "title": "Provider",
       "type": "string"
     },

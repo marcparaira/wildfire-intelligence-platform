@@ -312,7 +312,7 @@ def _utc_now() -> datetime:
 class SentinelProducer:
     """Acquires missing Sentinel-2 scenes of current incidents on each run.
 
-    Like ``GibsProducer``: ``incidents`` returns the latest incident revisions and
+    ``incidents`` returns the latest incident revisions and
     ``acquired`` the IDs of scenes in ``imagery.scenes``. Failed scenes are retried
     after a delay; scenes the pass's data does not reach are not retried while the
     process runs.
@@ -380,7 +380,7 @@ class SentinelProducer:
 
     def _store(self, request: PassRequest, content: bytes, url: str) -> SatelliteScene:
         digest = hashlib.sha256(content).hexdigest()
-        key = storage_key(request.scene, digest, "webp")
+        key = storage_key(request.scene, digest)
         self.store.put(key, content)
         west, south, east, north = request.scene.tile.bounds
         clearest = request.granules[-1]

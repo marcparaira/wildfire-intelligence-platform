@@ -339,28 +339,31 @@ def test_hourly_statistics_upsert_and_tombstones(schema_url: str) -> None:
 
 
 def satellite_scene(retrieved_at: datetime, sha256: str) -> SatelliteScene:
-    layer = ImageryLayer.VIIRS_NOAA20_TRUE_COLOR
+    layer = ImageryLayer.SENTINEL2_SWIR
     day = date(2026, 3, 5)
     return SatelliteScene(
         scene_id=scene_id(layer, day, "x228y2"),
-        provider=ImageryProvider.NASA_GIBS,
+        provider=ImageryProvider.PLANETARY_COMPUTER,
         layer=layer,
         instrument=layer.instrument,
-        platform=layer.platform,
+        platform="Sentinel-2B",
         acquisition_date=day,
         tile="x228y2",
         west=114.0,
         south=1.0,
         east=114.5,
         north=1.5,
-        width=512,
-        height=512,
-        media_type="image/jpeg",
+        width=2783,
+        height=2783,
+        media_type="image/webp",
         byte_size=1234,
         sha256=sha256 * 64,
-        storage_key=f"{layer}/2026-03-05/x228y2-{sha256 * 16}.jpg",
-        source_url="https://gibs.example/wms",
+        storage_key=f"{layer}/2026-03-05/x228y2-{sha256 * 16}.webp",
+        source_url="https://planetarycomputer.example/render",
         retrieved_at=retrieved_at,
+        acquired_at=retrieved_at - timedelta(hours=3),
+        cloud_cover=12.5,
+        granules=["S2B_A", "S2B_B"],
     )
 
 
@@ -371,13 +374,16 @@ def test_scenes_keep_the_latest_acquisition_with_a_footprint(schema_url: str) ->
     project(schema_url, projection, [(record(), newer), (record(), satellite_scene(T0, "a"))])
     with psycopg.connect(schema_url) as connection:
         row = connection.execute(
-            "SELECT layer, acquisition_date, sha256, ST_AsText(footprint), ST_SRID(footprint) "
-            + "FROM satellite_scenes"
+            "SELECT layer, acquisition_date, sha256, acquired_at, cloud_cover, granules, "
+            + "ST_AsText(footprint), ST_SRID(footprint) FROM satellite_scenes"
         ).fetchone()
     assert row == (
-        "VIIRS_NOAA20_CorrectedReflectance_TrueColor",
+        "Sentinel-2_L2A_SWIR_B12-B8A-B04",
         date(2026, 3, 5),
         "b" * 64,
+        T0 - timedelta(hours=2),
+        12.5,
+        ["S2B_A", "S2B_B"],
         "POLYGON((114 1,114 1.5,114.5 1.5,114.5 1,114 1))",
         4326,
     )
@@ -385,37 +391,6 @@ def test_scenes_keep_the_latest_acquisition_with_a_footprint(schema_url: str) ->
     project(schema_url, projection, [(record(key=str(newer.scene_id).encode()), None)])
     with psycopg.connect(schema_url) as connection:
         assert connection.execute("SELECT count(*) FROM satellite_scenes").fetchone() == (0,)
-
-
-@needs_database
-def test_scenes_keep_the_pass_time_cloud_cover_and_granules(schema_url: str) -> None:
-    layer = ImageryLayer.SENTINEL2_SWIR
-    day = date(2026, 3, 5)
-    sentinel = satellite_scene(T0, "c").model_copy(
-        update={
-            "scene_id": scene_id(layer, day, "x228y2"),
-            "provider": ImageryProvider.PLANETARY_COMPUTER,
-            "layer": layer,
-            "instrument": layer.instrument,
-            "platform": "Sentinel-2B",
-            "media_type": "image/webp",
-            "storage_key": f"{layer}/2026-03-05/x228y2-{'c' * 16}.webp",
-            "acquired_at": T0 - timedelta(hours=3),
-            "cloud_cover": 12.5,
-            "granules": ["S2B_A", "S2B_B"],
-        }
-    )
-    projection = SceneProjection(SchemaRegistry("http://unused"))
-    project(schema_url, projection, [(record(), satellite_scene(T0, "a")), (record(), sentinel)])
-    with psycopg.connect(schema_url) as connection:
-        rows = connection.execute(
-            "SELECT provider, acquired_at, cloud_cover, granules FROM satellite_scenes "
-            + "ORDER BY provider"
-        ).fetchall()
-    assert rows == [
-        ("nasa-gibs", None, None, []),
-        ("planetary-computer", T0 - timedelta(hours=3), 12.5, ["S2B_A", "S2B_B"]),
-    ]
 
 
 def _delete_subject(subject: str) -> None:

@@ -48,9 +48,8 @@ flowchart LR
     end
 
     %% Imagery Worker and its sources (shares packages/producers with the ingestor)
-    GIBS["NASA GIBS<br/>(VIIRS daily imagery)"]
     PC["Microsoft Planetary Computer<br/>(Sentinel-2 imagery)"]
-    IMG["Imagery Worker<br/>(GIBS, Sentinel-2)"]
+    IMG["Imagery Worker<br/>(Sentinel-2)"]
 
     %% Data Storage & Destinations
     DB[("PostgreSQL<br/>+ PostGIS")]
@@ -91,7 +90,6 @@ flowchart LR
 
     %% Imagery Worker: incidents in; images to the store, scene metadata back to Kafka
     T_DER -->|fire.incidents| IMG
-    GIBS --> IMG
     PC --> IMG
     IMG -->|imagery.scenes| T_DER
     IMG --> STORE
@@ -113,7 +111,7 @@ flowchart LR
     classDef streaming fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#92400e
     classDef storage fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
 
-    class FIRMS,METEO,GIBS,PC external
+    class FIRMS,METEO,PC external
     class ING,IMG done
     class T_SRC,T_DER,T_DLQ streaming
     class DB,STORE storage
@@ -139,7 +137,7 @@ are planned. Arrows show the direction data flows.
 | Service | Jobs | Responsibilities | Reads | Writes |
 |---|---|---|---|---|
 | **Ingestor** | — | Scheduled data producers for external sources | NASA FIRMS API, Open-Meteo API | `firms.detections`, `weather.forecasts` |
-| **Imagery Worker** | GIBS, Sentinel-2 | Scheduled satellite imagery of current fire incidents | `fire.incidents`, NASA GIBS, Microsoft Planetary Computer | `imagery.scenes`, the imagery store |
+| **Imagery Worker** | Sentinel-2 | Scheduled satellite imagery of current fire incidents | `fire.incidents`, Microsoft Planetary Computer | `imagery.scenes`, the imagery store |
 | **Stream Processor** | Enrichment, Incidents, Statistics, Alert (planned) | Add weather/country/risk to detections; cluster incidents; aggregate statistics; match watch areas | Source topics, compacted topics | Derived topics, `*.dlq` |
 | **Sink Worker** | PostGIS Projector, S3 Archiver, Alert Notifier (planned) | Persist projections to database; archive to S3; send notifications | All topics | PostgreSQL, S3, email/webhook |
 | **API Server** | — | Query incidents/hotspots/weather; stream live updates; handle user actions | PostgreSQL, Kafka (live stream) | User topics (`watch-areas`, `field-reports`, `alert-acks`) |
@@ -167,7 +165,6 @@ are planned. Arrows show the direction data flows.
 |---|---|---|---|
 | **NASA FIRMS API** | Data source | Satellite fire detections (SNPP, NOAA20) | ✅ Implemented |
 | **Open-Meteo API** | Data source | Weather forecasts (temperature, wind, precipitation) | ✅ Implemented |
-| **NASA GIBS** | Data source | VIIRS daily satellite imagery of incidents | ✅ Implemented |
 | **Microsoft Planetary Computer** | Data source | Sentinel-2 short-wave infrared imagery of incidents | ✅ Implemented |
 | **OpenAQ API** | Data source | Air quality readings | 🔲 Planned |
 | **PostgreSQL + PostGIS** | Data storage | Event projections, incidents, detection conditions | ✅ Implemented |

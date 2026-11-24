@@ -10,8 +10,6 @@ import math
 from dataclasses import dataclass
 
 TILE_DEGREES = 0.5
-# Context around the outermost detections of an incident, for the daily imagery.
-INCIDENT_MARGIN_DEGREES = 0.05
 
 Bounds = tuple[float, float, float, float]  # west, south, east, north in degrees
 
@@ -40,7 +38,7 @@ def tiles_covering(
     south: float,
     east: float,
     north: float,
-    margin: float = INCIDENT_MARGIN_DEGREES,
+    margin: float = 0,
 ) -> list[Tile]:
     """Tiles intersecting the bounds grown by ``margin``, row by row from the south-west."""
     max_column = math.ceil(180 / TILE_DEGREES) - 1

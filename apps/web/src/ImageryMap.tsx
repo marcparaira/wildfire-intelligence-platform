@@ -29,8 +29,6 @@ interface ImageryMapProps {
 }
 
 const ATTRIBUTIONS: Record<string, string> = {
-  "nasa-gibs":
-    'Imagery: <a href="https://earthdata.nasa.gov/gibs" target="_blank" rel="noreferrer">NASA EOSDIS GIBS</a>',
   "planetary-computer":
     'Contains modified Copernicus Sentinel data, via <a href="https://planetarycomputer.microsoft.com" target="_blank" rel="noreferrer">Microsoft Planetary Computer</a>',
 };
@@ -78,7 +76,7 @@ export default function ImageryMap({ scenes, incidentBounds, detections, opacity
             url: sceneImageUrl(scene),
             imageExtent: scene.bbox,
             projection: "EPSG:4326",
-            attributions: ATTRIBUTIONS[scene.provider] ?? ATTRIBUTIONS["nasa-gibs"],
+            attributions: ATTRIBUTIONS[scene.provider] ?? ATTRIBUTIONS["planetary-computer"],
           }),
         }),
     );

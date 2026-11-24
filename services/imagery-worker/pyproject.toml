@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wildfire-imagery-worker"
 version = "0.1.0"
-description = "Scheduled NASA GIBS and Sentinel-2 imagery of fire incidents"
+description = "Scheduled Sentinel-2 imagery of fire incidents"
 requires-python = ">=3.12"
 dependencies = [
     "wildfire-events",

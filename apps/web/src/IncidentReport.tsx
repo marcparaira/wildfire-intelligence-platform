@@ -8,7 +8,6 @@ import {
   defaultImageryDay,
   imageryDays,
   imageryLayers,
-  SENTINEL_SWIR,
   useIncidentImagery,
 } from "./imagery";
 import type { DayTiming, ImageryLayer, IncidentImagery, SatelliteScene } from "./imagery";
@@ -58,19 +57,13 @@ function SwirLegend() {
 function SceneCaption({ layer, day, scenes }: { layer: ImageryLayer; day: string; scenes: SatelliteScene[] }) {
   const first = scenes[0];
   const tiles = `${scenes.length} ${scenes.length === 1 ? "tile" : "tiles"}`;
-  if (first.acquired_at === null) {
-    return (
-      <>
-        <strong>{imageryLayers[layer].label}</strong> · {first.platform} {first.instrument} daily composite ·
-        acquired <time dateTime={day}>{day}</time> (UTC day) · retrieved {formatUtc(first.retrieved_at)} · {tiles}
-      </>
-    );
-  }
   const cloud = scenes.map((scene) => scene.cloud_cover).filter((value): value is number => value !== null);
   return (
     <>
-      <strong>{imageryLayers[layer].label}</strong> · {first.platform} {first.instrument} pass at{" "}
-      <time dateTime={first.acquired_at}>{formatUtc(first.acquired_at)}</time>
+      <strong>{imageryLayers[layer].label}</strong> · {first.platform} {first.instrument} pass{" "}
+      {first.acquired_at === null
+        ? <>on <time dateTime={day}>{day}</time> (UTC day)</>
+        : <>at <time dateTime={first.acquired_at}>{formatUtc(first.acquired_at)}</time></>}
       {cloud.length > 0 && <> · granule cloud cover {Math.round(Math.min(...cloud))}–{Math.round(Math.max(...cloud))}%</>}
       {" "}· {tiles}
     </>
@@ -113,20 +106,22 @@ function SatelliteImagery({ incident, imagery, loading, error, detections }: Sat
     return (
       <p className="detail-note" role="status">
         No satellite imagery has been acquired for this incident yet. Sentinel-2 passes every 2–5 days
-        and its images arrive 1–3 days later; NASA GIBS daily composites are fetched from about 12:00 UTC.
+        and its images arrive 1–3 days later.
       </p>
     );
   }
   return (
     <div className="imagery">
       <div className="imagery-controls">
-        <div className="segmented" role="radiogroup" aria-label="Imagery layer">
-          {layers.map((item) => (
-            <button key={item} type="button" role="radio" aria-checked={item === layer} title={imageryLayers[item].description} onClick={() => setChosenLayer(item)}>
-              {imageryLayers[item].label}
-            </button>
-          ))}
-        </div>
+        {layers.length > 1 && (
+          <div className="segmented" role="radiogroup" aria-label="Imagery layer">
+            {layers.map((item) => (
+              <button key={item} type="button" role="radio" aria-checked={item === layer} title={imageryLayers[item].description} onClick={() => setChosenLayer(item)}>
+                {imageryLayers[item].label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="imagery-days" role="radiogroup" aria-label="Acquisition date (UTC)">
           {days.map((entry) => {
             const timing = dayTiming(entry.day, activeDays);
@@ -144,7 +139,7 @@ function SatelliteImagery({ incident, imagery, loading, error, detections }: Sat
           <SceneCaption layer={layer} day={selected.day} scenes={selected.scenes} />
           {" "}· <span className={`timing timing-${dayTiming(selected.day, activeDays)}`}>{DAY_TIMING_TITLES[dayTiming(selected.day, activeDays)].toLowerCase()}</span>
           <span className="detail-note">{imageryLayers[layer].description}</span>
-          {layer === SENTINEL_SWIR && <SwirLegend />}
+          <SwirLegend />
         </figcaption>
       </figure>
       <div className="imagery-options">
@@ -159,9 +154,9 @@ function SatelliteImagery({ incident, imagery, loading, error, detections }: Sat
       </div>
       <p className="detail-note">
         Dashed outline: the incident's detection bounding box. Days with fire detections are marked in orange.
-        {layer === SENTINEL_SWIR
-          ? " Sentinel-2 passes in the late morning, while VIIRS detects fires in the early afternoon and at night, so a fire may not be burning at the pass. A pass after the detections confirms the fire by its fresh burn scar; compare it with a pass from before. Cloud hides the ground."
-          : " Clouds and smoke can hide the ground; the daily composite combines the day's passes, so its time of day is not exact."}
+        Sentinel-2 passes in the late morning, while VIIRS detects fires in the early afternoon and at night, so a
+        fire may not be burning at the pass. A pass after the detections confirms the fire by its fresh burn scar;
+        compare it with a pass from before. Cloud hides the ground.
       </p>
     </div>
   );
@@ -217,8 +212,8 @@ export function IncidentReport({ incidentId }: { incidentId: string }) {
             <p>{INCIDENT_METHOD_NOTE}</p>
             <p>
               Sources: NASA FIRMS active-fire detections (VIIRS &amp; MODIS NRT), Open-Meteo forecasts,
-              NASA GIBS corrected-reflectance imagery, and Copernicus Sentinel-2 imagery via Microsoft
-              Planetary Computer. Detections are not fire perimeters.
+              and Copernicus Sentinel-2 imagery via Microsoft Planetary Computer. Detections are not fire
+              perimeters.
             </p>
           </footer>
         </>
